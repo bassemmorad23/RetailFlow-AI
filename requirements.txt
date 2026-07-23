@@ -1,0 +1,23 @@
+# ── Data validation & settings ─────────────────────────────────────────────
+pydantic==2.13.4
+pydantic-settings==2.14.2
+
+# ── Machine learning ───────────────────────────────────────────────────────
+torch==2.12.1
+transformers==5.12.1
+sentence-transformers==5.6.0
+
+# ── HuggingFace Inference API ──────────────────────────────────────────────
+huggingface-hub==1.20.1
+
+
+
+fastapi==0.115.0
+uvicorn==0.30.0
+motor==3.5.0          # async MongoDB driver
+pymongo==4.8.0
+
+
+
+# ── OpenRouter (OpenAI-compatible client) ──────────────────────────────────
+openai==1.54.0
