@@ -24,7 +24,7 @@ model first so failover isn't relying entirely on correlated free tiers.
 from email import message
 import logging
 
-from matplotlib import lines
+
 from openai import OpenAI
 from openai import APIStatusError, APITimeoutError, APIConnectionError
 from tenacity import (

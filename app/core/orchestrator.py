@@ -26,6 +26,10 @@ from app.memory.conversation_memory import add_turn, get_memory
 from app.rag.retriever import retrieve_context
 from app.recommendation.product_recommender import recommend_products
 from app.response.response_generator import generate_response
+
+from app.memory.fact_extractor import extract_facts
+from app.memory.conversation_memory import add_turn, get_memory, update_known_facts
+
 from app.schemas.models import (
     AgentReply,
     CustomerMessage,
@@ -114,6 +118,20 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         add_turn(message.conversation_id, "agent", reply_text)
     except Exception:
         logger.warning("Memory update failed, turn not persisted.", exc_info=True)
+
+    # Step 7b — Fact extraction (non-critical, runs AFTER the reply so the
+    # customer never waits on it. Facts land in time for the NEXT turn.)
+    try:
+        new_facts = extract_facts(message.text)
+        if new_facts:
+            # Only keys actually found are passed — existing facts not
+            # mentioned in this message are left untouched.
+            update_known_facts(message.conversation_id, **new_facts)
+            logger.info("Extracted facts: %s", new_facts)
+    except Exception:
+        logger.warning("Fact extraction failed.", exc_info=True)
+        
+        
 
     # Step 8 — Assemble reply
     reply = AgentReply(
