@@ -9,3 +9,5 @@ venv/
 .coverage
 htmlcov/
 data/embeddings/
+data/analytics/
+data/embeddings/

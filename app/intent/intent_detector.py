@@ -26,7 +26,7 @@ def get_pipeline():
 def detect_intent(text:str):
     if not text or not text.strip():
         return IntentResult(
-            Label=IntentLabel.OTHER,
+            label=IntentLabel.OTHER,
             confidence=0.0
         )
         
@@ -43,7 +43,7 @@ def detect_intent(text:str):
     mapped_label =_CANDIDATE_LABEL_TO_ENUM.get(top_label,IntentLabel.OTHER)
     
     return IntentResult(
-        Label=mapped_label,
+        label=mapped_label,
         confidence=top_score 
     )
     

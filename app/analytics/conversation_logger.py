@@ -62,11 +62,11 @@ def log_turn(message: CustomerMessage, reply: AgentReply) -> None:
             "channel": message.channel,
             "customer_message": message.text,
             "emotion": {
-                "label": reply.emotion.Label.value,
+                "label": reply.emotion.label.value,
                 "confidence": reply.emotion.confidence,
             },
             "intent": {
-                "label": reply.intent.Label.value,
+                "label": reply.intent.label.value,
                 "confidence": reply.intent.confidence,
             },
             "recommendations": [

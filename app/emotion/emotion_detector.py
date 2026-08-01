@@ -32,7 +32,7 @@ def detect_emotion(text:str):
         
         return EmotionResult(
             
-            Label=EmotionLabel.NEUTRAL,
+            label=EmotionLabel.NEUTRAL,
             confidence=0.0,
             scores={}   
         )
@@ -48,7 +48,7 @@ def detect_emotion(text:str):
         
     return EmotionResult(
             
-        Label=label,
+        label=label,
         confidence=top['score'],
         scores=scores
            

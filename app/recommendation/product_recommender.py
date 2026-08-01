@@ -45,7 +45,7 @@ def _build_reason(chunk: RetrievedChunk, known_facts: KnownFacts) -> str:
 
 def recommend_products(intent:IntentResult,memory:MemoryState,retrieved_context:list[RetrievedChunk]):
     
-    if intent.Label not in _RECOMMENDATION_INTENTS:
+    if intent.label not in _RECOMMENDATION_INTENTS:
         return []
     
     if not retrieved_context:
