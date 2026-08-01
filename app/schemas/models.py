@@ -78,7 +78,7 @@ class EmotionLabel(str,Enum):
     
     
 class EmotionResult(BaseModel):
-    Label:EmotionLabel
+    label:EmotionLabel
     confidence:float
     scores: dict[str, float]
     
@@ -102,7 +102,7 @@ class IntentLabel(str, Enum):
     
     
 class IntentResult(BaseModel):
-    Label :IntentLabel
+    label: IntentLabel
     confidence: float = Field(ge=0.0, le=1.0)
     
     
