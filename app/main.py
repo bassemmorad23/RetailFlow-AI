@@ -17,11 +17,16 @@ PREREQUISITES:
 """
 
 import uuid
+
+from app.logging_config import setup_logging
 from app.schemas.models import CustomerMessage
 from app.core.orchestrator import handle_message
 
 
 def main() -> None:
+    # Configure logging before anything else.
+    setup_logging()
+
     print("=" * 50)
     print("  StoreFlow AI — Prototype Sales Agent")
     print("  Type 'quit' to exit.")
@@ -55,8 +60,8 @@ def main() -> None:
         reply = handle_message(message)
 
         print(f"Agent : {reply.reply_text}")
-        print(f"\n  emotion : {reply.emotion.Label.value} ({reply.emotion.confidence:.0%})")
-        print(f"  intent  : {reply.intent.Label.value} ({reply.intent.confidence:.0%})")
+        print(f"\n  emotion : {reply.emotion.label.value} ({reply.emotion.confidence:.0%})")
+        print(f"  intent  : {reply.intent.label.value} ({reply.intent.confidence:.0%})")
 
         if reply.recommendations:
             names = [r.name for r in reply.recommendations]
