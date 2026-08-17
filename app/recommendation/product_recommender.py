@@ -11,17 +11,12 @@ _RECOMMENDATION_INTENTS = {
 }
 
 _MIN_SCORE_THRESHOLD = 0.4
-_PRODUCT_SOURCE_PREFIX = "product_"
+_PRODUCT_SOURCE_PREFIX = "prod_"
 
 
 
 
 
-def _source_to_name(source:str):
-    
-    without_prefix=source.removeprefix(_PRODUCT_SOURCE_PREFIX)
-    
-    return without_prefix.replace("_", " ").title()
 
 
 
@@ -63,13 +58,13 @@ def recommend_products(intent:IntentResult,memory:MemoryState,retrieved_context:
             continue
         
         reason=_build_reason(chunk,known_facts)
-        display_name = _source_to_name(chunk.source)
+        
         
         recommendations.append(
             ProductRecommendation(
                 product_id=chunk.source,
-                name=display_name,
-                price=0.0,
+                name=chunk.name or chunk.source,
+                price=chunk.price if chunk.price is not None else 0.0,
                 reason=reason,
             )
         )

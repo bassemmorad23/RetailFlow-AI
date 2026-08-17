@@ -39,7 +39,7 @@ def load_products():
             
         )
         
-        docs.append({"source": p["id"], "content": content})
+        docs.append({"source": p["id"], "content": content, "name": p["title"], "price": p["price"]})
         
     return docs
 

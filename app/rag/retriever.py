@@ -116,6 +116,8 @@ def retrieve_context(
                     content=document["content"],
                     source=document["source"],
                     score=score,
+                    name=document.get("name"),
+                    price=document.get("price"),
                 )
             )
 

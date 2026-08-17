@@ -1,6 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel ,Field , field_validator
 import unicodedata
+from typing import Literal
 
 
 
@@ -116,7 +117,7 @@ class IntentResult(BaseModel):
 
 
 class ConversationTurn(BaseModel):
-    role: str
+    role: Literal["customer", "agent"]
     text: str
     
     
@@ -141,6 +142,8 @@ class RetrievedChunk(BaseModel):
     content: str
     source: str
     score: float
+    name: str | None = None
+    price: float | None = None
     
     
 # ---------------------------------------------------------------------------
