@@ -1,0 +1,33 @@
+# Never send secrets or local env into the Docker build context
+.env
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+
+# Generated/runtime data — rebuilt inside the image or mounted as a volume
+data/embeddings/*.pkl
+data/analytics/*.jsonl
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store
+
+# Local scratch files
+testtt.py
+test.py
+*.log
+
+tests/
