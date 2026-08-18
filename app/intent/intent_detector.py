@@ -3,15 +3,23 @@ from app.schemas.models import IntentLabel ,IntentResult
 from functools import lru_cache
 
 _CANDIDATE_LABEL_TO_ENUM = {
-    "browsing or window shopping": IntentLabel.BROWSING,
-    "asking about the price of a product": IntentLabel.ASKING_PRICE,
-    "asking if a product is in stock or available": IntentLabel.ASKING_AVAILABILITY,
-    "asking for a product recommendation": IntentLabel.WANTS_RECOMMENDATION,
-    "asking for details about a product": IntentLabel.ASKING_DETAILS,
-    "complaining about a problem or issue": IntentLabel.COMPLAINT,
-    "ready to purchase or buy now": IntentLabel.READY_TO_BUY,
-    "something else not related to shopping": IntentLabel.OTHER
+    "The customer is browsing products without asking for a specific product or action.": IntentLabel.BROWSING,
+
+    "The customer is asking about the price or cost of a product.": IntentLabel.ASKING_PRICE,
+
+    "The customer is asking whether a product, size, color, or variant is available.": IntentLabel.ASKING_AVAILABILITY,
+
+    "The customer wants help choosing or recommending a product or outfit.": IntentLabel.WANTS_RECOMMENDATION,
+
+    "The customer is asking for information or details about a product, such as material, fit, or care.": IntentLabel.ASKING_DETAILS,
+
+    "The customer is reporting a problem, dissatisfaction, delay, damage, or other complaint.": IntentLabel.COMPLAINT,
+
+    "The customer has decided to purchase a product or wants to place or confirm an order.": IntentLabel.READY_TO_BUY,
+
+    "The customer is asking something that does not fit the other shopping intents.": IntentLabel.OTHER,
 }
+
 
 
 @lru_cache(maxsize=1)

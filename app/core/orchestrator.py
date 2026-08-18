@@ -17,12 +17,12 @@ Failure hierarchy:
       Catch exception, log warning, never block the return.
 """
 
+
 import logging
 
 from app.analytics.conversation_logger import log_turn
 from app.emotion.emotion_detector import detect_emotion
 from app.intent.intent_detector import detect_intent
-from app.memory.conversation_memory import add_turn, get_memory
 from app.rag.retriever import retrieve_context
 from app.recommendation.product_recommender import recommend_products
 from app.response.response_generator import generate_response
@@ -84,8 +84,19 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             known_facts=KnownFacts(),
         )
 
-    # Step 4 — RAG retrieval (retriever already returns [] on failure)
-    retrieved_context = retrieve_context(message.text)
+    # Step 4 — RAG retrieval (protected at the orchestrator level)
+    try:
+        retrieved_context = retrieve_context(message.text)
+    except Exception:
+        logger.warning(
+        "RAG retrieval failed, using empty context.",exc_info=True)
+        
+        retrieved_context = []
+    
+    
+    
+    
+    
 
     # Step 5 — Recommendations
     try:
@@ -144,6 +155,10 @@ def handle_message(message: CustomerMessage) -> AgentReply:
     )
 
     # Step 9 — Analytics (log_turn has its own try/except inside)
-    log_turn(message, reply)
-
+    try:
+        log_turn(message, reply)
+    except Exception:
+        logger.warning(
+        "Conversation logging failed.",exc_info=True)
+        
     return reply

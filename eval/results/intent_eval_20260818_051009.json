@@ -1,0 +1,350 @@
+{
+  "timestamp": "2026-08-18T05:10:09.051502+00:00",
+  "n_examples": 40,
+  "accuracy": 0.725,
+  "per_class_report": {
+    "browsing": {
+      "precision": 1.0,
+      "recall": 0.4,
+      "f1-score": 0.5714285714285714,
+      "support": 5.0
+    },
+    "asking_price": {
+      "precision": 0.8333333333333334,
+      "recall": 1.0,
+      "f1-score": 0.9090909090909091,
+      "support": 5.0
+    },
+    "asking_availability": {
+      "precision": 0.7142857142857143,
+      "recall": 1.0,
+      "f1-score": 0.8333333333333334,
+      "support": 5.0
+    },
+    "wants_recommendation": {
+      "precision": 1.0,
+      "recall": 0.2,
+      "f1-score": 0.3333333333333333,
+      "support": 5.0
+    },
+    "asking_details": {
+      "precision": 0.5,
+      "recall": 1.0,
+      "f1-score": 0.6666666666666666,
+      "support": 5.0
+    },
+    "complaint": {
+      "precision": 0.625,
+      "recall": 1.0,
+      "f1-score": 0.7692307692307693,
+      "support": 5.0
+    },
+    "ready_to_buy": {
+      "precision": 1.0,
+      "recall": 0.6,
+      "f1-score": 0.75,
+      "support": 5.0
+    },
+    "other": {
+      "precision": 1.0,
+      "recall": 0.6,
+      "f1-score": 0.75,
+      "support": 5.0
+    },
+    "accuracy": 0.725,
+    "macro avg": {
+      "precision": 0.8340773809523809,
+      "recall": 0.725,
+      "f1-score": 0.6978854478854479,
+      "support": 40.0
+    },
+    "weighted avg": {
+      "precision": 0.834077380952381,
+      "recall": 0.725,
+      "f1-score": 0.6978854478854479,
+      "support": 40.0
+    }
+  },
+  "per_example_results": [
+    {
+      "text": "just looking around, thanks",
+      "expected": "browsing",
+      "predicted": "browsing",
+      "confidence": 0.7838515043258667,
+      "correct": true
+    },
+    {
+      "text": "what do you have in stock right now?",
+      "expected": "browsing",
+      "predicted": "asking_availability",
+      "confidence": 0.46062979102134705,
+      "correct": false
+    },
+    {
+      "text": "hi",
+      "expected": "browsing",
+      "predicted": "complaint",
+      "confidence": 0.22479504346847534,
+      "correct": false
+    },
+    {
+      "text": "show me what's new",
+      "expected": "browsing",
+      "predicted": "asking_details",
+      "confidence": 0.3464322090148926,
+      "correct": false
+    },
+    {
+      "text": "I'm just browsing, not looking for anything specific",
+      "expected": "browsing",
+      "predicted": "browsing",
+      "confidence": 0.9560427665710449,
+      "correct": true
+    },
+    {
+      "text": "how much is the red dress?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.37350499629974365,
+      "correct": true
+    },
+    {
+      "text": "what's the price of the hoodie?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.5327953696250916,
+      "correct": true
+    },
+    {
+      "text": "how much does this cost?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.6272442936897278,
+      "correct": true
+    },
+    {
+      "text": "what is the price of this jacket?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.601356565952301,
+      "correct": true
+    },
+    {
+      "text": "is it 500 or 600 EGP?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.4288923442363739,
+      "correct": true
+    },
+    {
+      "text": "do you have this in size large?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.4996834993362427,
+      "correct": true
+    },
+    {
+      "text": "is the black jacket still in stock?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.5763505697250366,
+      "correct": true
+    },
+    {
+      "text": "do you have this in blue?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.645552396774292,
+      "correct": true
+    },
+    {
+      "text": "is this available in medium?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.5361893177032471,
+      "correct": true
+    },
+    {
+      "text": "any left in medium?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.5363462567329407,
+      "correct": true
+    },
+    {
+      "text": "what would you recommend for a summer outfit?",
+      "expected": "wants_recommendation",
+      "predicted": "asking_details",
+      "confidence": 0.4244319796562195,
+      "correct": false
+    },
+    {
+      "text": "suggest something for a casual look",
+      "expected": "wants_recommendation",
+      "predicted": "wants_recommendation",
+      "confidence": 0.4689541161060333,
+      "correct": true
+    },
+    {
+      "text": "what goes well with black jeans?",
+      "expected": "wants_recommendation",
+      "predicted": "asking_details",
+      "confidence": 0.31826549768447876,
+      "correct": false
+    },
+    {
+      "text": "can you recommend something for me?",
+      "expected": "wants_recommendation",
+      "predicted": "asking_details",
+      "confidence": 0.3679623007774353,
+      "correct": false
+    },
+    {
+      "text": "help me pick something for a wedding",
+      "expected": "wants_recommendation",
+      "predicted": "asking_details",
+      "confidence": 0.3250306248664856,
+      "correct": false
+    },
+    {
+      "text": "what material is this jacket made of?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.5928856730461121,
+      "correct": true
+    },
+    {
+      "text": "does this shirt shrink after washing?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.7955992817878723,
+      "correct": true
+    },
+    {
+      "text": "is this true to size?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.34650442004203796,
+      "correct": true
+    },
+    {
+      "text": "what fabric is this dress made from?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.6979195475578308,
+      "correct": true
+    },
+    {
+      "text": "how does the fit compare to a regular tee?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.5993897914886475,
+      "correct": true
+    },
+    {
+      "text": "this order arrived damaged",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.820164144039154,
+      "correct": true
+    },
+    {
+      "text": "I've been waiting two weeks and nothing came",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.7527192234992981,
+      "correct": true
+    },
+    {
+      "text": "the size chart was wrong, this doesn't fit at all",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.3881036639213562,
+      "correct": true
+    },
+    {
+      "text": "my order is late and I want to know why",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.7018536329269409,
+      "correct": true
+    },
+    {
+      "text": "very disappointed with the quality",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.5712640881538391,
+      "correct": true
+    },
+    {
+      "text": "I'll take it, how do I pay?",
+      "expected": "ready_to_buy",
+      "predicted": "asking_price",
+      "confidence": 0.37207266688346863,
+      "correct": false
+    },
+    {
+      "text": "add this to my order",
+      "expected": "ready_to_buy",
+      "predicted": "ready_to_buy",
+      "confidence": 0.42124852538108826,
+      "correct": true
+    },
+    {
+      "text": "yes, let's go with the red one, size M",
+      "expected": "ready_to_buy",
+      "predicted": "asking_availability",
+      "confidence": 0.25203436613082886,
+      "correct": false
+    },
+    {
+      "text": "I want to buy this now",
+      "expected": "ready_to_buy",
+      "predicted": "ready_to_buy",
+      "confidence": 0.7431992292404175,
+      "correct": true
+    },
+    {
+      "text": "confirm the order please",
+      "expected": "ready_to_buy",
+      "predicted": "ready_to_buy",
+      "confidence": 0.4462851881980896,
+      "correct": true
+    },
+    {
+      "text": "what are your working hours?",
+      "expected": "other",
+      "predicted": "other",
+      "confidence": 0.42786914110183716,
+      "correct": true
+    },
+    {
+      "text": "do you have a physical store?",
+      "expected": "other",
+      "predicted": "other",
+      "confidence": 0.27356088161468506,
+      "correct": true
+    },
+    {
+      "text": "can I speak to a human?",
+      "expected": "other",
+      "predicted": "complaint",
+      "confidence": 0.39337849617004395,
+      "correct": false
+    },
+    {
+      "text": "where is your store located?",
+      "expected": "other",
+      "predicted": "other",
+      "confidence": 0.4301903247833252,
+      "correct": true
+    },
+    {
+      "text": "what's your return policy?",
+      "expected": "other",
+      "predicted": "complaint",
+      "confidence": 0.2859695851802826,
+      "correct": false
+    }
+  ]
+}

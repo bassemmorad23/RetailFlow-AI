@@ -68,9 +68,9 @@ class CustomerMessage(BaseModel):
 
 
 
-class EmotionLabel(str,Enum):
+class EmotionLabel(str, Enum):
     HAPPY = "happy"
-    SADNESS = "frustrated"
+    SADNESS = "sadness"
     EXCITED = "excited"
     CONFUSED = "confused"
     NEUTRAL = "neutral"
@@ -143,7 +143,7 @@ class RetrievedChunk(BaseModel):
     source: str
     score: float
     name: str | None = None
-    price: float | None = None
+    
     
     
 # ---------------------------------------------------------------------------

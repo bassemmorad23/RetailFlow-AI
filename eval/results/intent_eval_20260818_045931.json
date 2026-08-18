@@ -1,0 +1,350 @@
+{
+  "timestamp": "2026-08-18T04:59:31.528591+00:00",
+  "n_examples": 40,
+  "accuracy": 0.55,
+  "per_class_report": {
+    "browsing": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 5.0
+    },
+    "asking_price": {
+      "precision": 0.8,
+      "recall": 0.8,
+      "f1-score": 0.8,
+      "support": 5.0
+    },
+    "asking_availability": {
+      "precision": 0.75,
+      "recall": 0.6,
+      "f1-score": 0.6666666666666666,
+      "support": 5.0
+    },
+    "wants_recommendation": {
+      "precision": 0.75,
+      "recall": 0.6,
+      "f1-score": 0.6666666666666666,
+      "support": 5.0
+    },
+    "asking_details": {
+      "precision": 0.5,
+      "recall": 0.8,
+      "f1-score": 0.6153846153846154,
+      "support": 5.0
+    },
+    "complaint": {
+      "precision": 0.35714285714285715,
+      "recall": 1.0,
+      "f1-score": 0.5263157894736842,
+      "support": 5.0
+    },
+    "ready_to_buy": {
+      "precision": 1.0,
+      "recall": 0.4,
+      "f1-score": 0.5714285714285714,
+      "support": 5.0
+    },
+    "other": {
+      "precision": 0.3333333333333333,
+      "recall": 0.2,
+      "f1-score": 0.25,
+      "support": 5.0
+    },
+    "accuracy": 0.55,
+    "macro avg": {
+      "precision": 0.5613095238095238,
+      "recall": 0.55,
+      "f1-score": 0.5120577887025255,
+      "support": 40.0
+    },
+    "weighted avg": {
+      "precision": 0.5613095238095238,
+      "recall": 0.55,
+      "f1-score": 0.5120577887025256,
+      "support": 40.0
+    }
+  },
+  "per_example_results": [
+    {
+      "text": "just looking around, thanks",
+      "expected": "browsing",
+      "predicted": "other",
+      "confidence": 0.48193225264549255,
+      "correct": false
+    },
+    {
+      "text": "what do you have in stock right now?",
+      "expected": "browsing",
+      "predicted": "asking_availability",
+      "confidence": 0.49774113297462463,
+      "correct": false
+    },
+    {
+      "text": "hi",
+      "expected": "browsing",
+      "predicted": "complaint",
+      "confidence": 0.23726816475391388,
+      "correct": false
+    },
+    {
+      "text": "show me what's new",
+      "expected": "browsing",
+      "predicted": "asking_details",
+      "confidence": 0.3789369761943817,
+      "correct": false
+    },
+    {
+      "text": "بتفرج بس",
+      "expected": "browsing",
+      "predicted": "complaint",
+      "confidence": 0.3385096788406372,
+      "correct": false
+    },
+    {
+      "text": "how much is the red dress?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.598798394203186,
+      "correct": true
+    },
+    {
+      "text": "what's the price of the hoodie?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.557813286781311,
+      "correct": true
+    },
+    {
+      "text": "how much does this cost",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.6190764904022217,
+      "correct": true
+    },
+    {
+      "text": "بكام الفستان ده؟",
+      "expected": "asking_price",
+      "predicted": "complaint",
+      "confidence": 0.47677189111709595,
+      "correct": false
+    },
+    {
+      "text": "is it 500 or 600 EGP?",
+      "expected": "asking_price",
+      "predicted": "asking_price",
+      "confidence": 0.4092748463153839,
+      "correct": true
+    },
+    {
+      "text": "do you have this in size large?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.506746768951416,
+      "correct": true
+    },
+    {
+      "text": "is the black jacket still in stock?",
+      "expected": "asking_availability",
+      "predicted": "asking_details",
+      "confidence": 0.5018349289894104,
+      "correct": false
+    },
+    {
+      "text": "do you have this in blue?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.6935768127441406,
+      "correct": true
+    },
+    {
+      "text": "متوفر مقاس ميديم؟",
+      "expected": "asking_availability",
+      "predicted": "complaint",
+      "confidence": 0.49741876125335693,
+      "correct": false
+    },
+    {
+      "text": "any left in medium?",
+      "expected": "asking_availability",
+      "predicted": "asking_availability",
+      "confidence": 0.45238548517227173,
+      "correct": true
+    },
+    {
+      "text": "what would you recommend for a summer outfit?",
+      "expected": "wants_recommendation",
+      "predicted": "wants_recommendation",
+      "confidence": 0.80325847864151,
+      "correct": true
+    },
+    {
+      "text": "suggest something for a casual look",
+      "expected": "wants_recommendation",
+      "predicted": "other",
+      "confidence": 0.569588840007782,
+      "correct": false
+    },
+    {
+      "text": "what goes well with black jeans?",
+      "expected": "wants_recommendation",
+      "predicted": "wants_recommendation",
+      "confidence": 0.5415844321250916,
+      "correct": true
+    },
+    {
+      "text": "عايز اقتراح لبس كاجوال",
+      "expected": "wants_recommendation",
+      "predicted": "complaint",
+      "confidence": 0.611064612865448,
+      "correct": false
+    },
+    {
+      "text": "help me pick something for a wedding",
+      "expected": "wants_recommendation",
+      "predicted": "wants_recommendation",
+      "confidence": 0.6712688207626343,
+      "correct": true
+    },
+    {
+      "text": "what material is this jacket made of?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.957615315914154,
+      "correct": true
+    },
+    {
+      "text": "does this shirt shrink after washing?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.8794242143630981,
+      "correct": true
+    },
+    {
+      "text": "is this true to size?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.38919597864151,
+      "correct": true
+    },
+    {
+      "text": "الفستان ده قماشه ايه؟",
+      "expected": "asking_details",
+      "predicted": "complaint",
+      "confidence": 0.544393002986908,
+      "correct": false
+    },
+    {
+      "text": "how does the fit compare to a regular tee?",
+      "expected": "asking_details",
+      "predicted": "asking_details",
+      "confidence": 0.9229856133460999,
+      "correct": true
+    },
+    {
+      "text": "this order arrived damaged",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.8716514706611633,
+      "correct": true
+    },
+    {
+      "text": "I've been waiting two weeks and nothing came",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.8470427989959717,
+      "correct": true
+    },
+    {
+      "text": "the size chart was wrong, this doesn't fit at all",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.9197823405265808,
+      "correct": true
+    },
+    {
+      "text": "الطلب اتأخر جدا وعايز اعرف السبب",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.5703132152557373,
+      "correct": true
+    },
+    {
+      "text": "very disappointed with the quality",
+      "expected": "complaint",
+      "predicted": "complaint",
+      "confidence": 0.8650766611099243,
+      "correct": true
+    },
+    {
+      "text": "I'll take it, how do I pay?",
+      "expected": "ready_to_buy",
+      "predicted": "asking_price",
+      "confidence": 0.40678465366363525,
+      "correct": false
+    },
+    {
+      "text": "add this to my order",
+      "expected": "ready_to_buy",
+      "predicted": "ready_to_buy",
+      "confidence": 0.47911494970321655,
+      "correct": true
+    },
+    {
+      "text": "yes let's go with the red one, size M",
+      "expected": "ready_to_buy",
+      "predicted": "wants_recommendation",
+      "confidence": 0.3508944809436798,
+      "correct": false
+    },
+    {
+      "text": "عايز اشتري ده دلوقتي",
+      "expected": "ready_to_buy",
+      "predicted": "complaint",
+      "confidence": 0.5983750820159912,
+      "correct": false
+    },
+    {
+      "text": "confirm the order please",
+      "expected": "ready_to_buy",
+      "predicted": "ready_to_buy",
+      "confidence": 0.38682591915130615,
+      "correct": true
+    },
+    {
+      "text": "what are your working hours?",
+      "expected": "other",
+      "predicted": "other",
+      "confidence": 0.23675110936164856,
+      "correct": true
+    },
+    {
+      "text": "do you have a physical store?",
+      "expected": "other",
+      "predicted": "asking_details",
+      "confidence": 0.610103964805603,
+      "correct": false
+    },
+    {
+      "text": "can I speak to a human?",
+      "expected": "other",
+      "predicted": "complaint",
+      "confidence": 0.48234108090400696,
+      "correct": false
+    },
+    {
+      "text": "فين الفرع بتاعكم؟",
+      "expected": "other",
+      "predicted": "complaint",
+      "confidence": 0.40765711665153503,
+      "correct": false
+    },
+    {
+      "text": "what's your return policy?",
+      "expected": "other",
+      "predicted": "asking_details",
+      "confidence": 0.5111404657363892,
+      "correct": false
+    }
+  ]
+}

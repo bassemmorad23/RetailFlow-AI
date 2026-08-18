@@ -2,16 +2,16 @@ from transformers import pipeline
 from app.schemas.models import EmotionLabel ,EmotionResult
 from functools import lru_cache
 
-_MODEL_LABEL_TO_ENUM={
-   "joy": EmotionLabel.HAPPY,
+_MODEL_LABEL_TO_ENUM = {
+    "joy": EmotionLabel.HAPPY,
     "anger": EmotionLabel.ANGRY,
     "sadness": EmotionLabel.SADNESS,
     "fear": EmotionLabel.CONFUSED,
     "surprise": EmotionLabel.EXCITED,
     "disgust": EmotionLabel.ANGRY,
     "neutral": EmotionLabel.NEUTRAL,
- 
 }
+
 
 
 @lru_cache(maxsize=1)
@@ -20,7 +20,7 @@ def get_pipeline():
         task="text-classification",
         model="j-hartmann/emotion-english-distilroberta-base",
         top_k=None,
-        device=0  # CPU explicit
+        device=0  
         )
     
     

@@ -27,6 +27,26 @@ def _get_collection():
 
 
 
+def get_memory(conversation_id: str):
+    
+    col=_get_collection()
+    doc=col.find_one({"conversation_id":conversation_id})
+    
+    if doc is None:
+        fresh=MemoryState(conversation_id=conversation_id,history=[],known_facts=KnownFacts())
+        col.insert_one(fresh.model_dump())
+        return fresh
+    
+    return _doc_to_memory(doc)
+
+
+
+
+
+
+
+
+
 
 
 def _doc_to_memory(doc:dict):
@@ -40,20 +60,6 @@ def _doc_to_memory(doc:dict):
     
     
     
-    
-    
-def get_memory(conversation_id: str):
-    
-    col=_get_collection()
-    doc=col.find_one({"conversation_id":conversation_id})
-    
-    if doc is None:
-        fresh=MemoryState(conversation_id=conversation_id,history=[],known_facts=KnownFacts())
-        col.insert_one(fresh.model_dump())
-        return fresh
-    
-    return _doc_to_memory(doc)
-
 
 
 

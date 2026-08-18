@@ -1,9 +1,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Literal
 
 class Settings(BaseSettings):
     model_config=SettingsConfigDict(env_file=".env", extra="ignore")
     
-    APP_ENV: str
+    APP_ENV: Literal["prototype", "development", "production"]
     
     HF_TOKEN: str
     MONGO_USER: str

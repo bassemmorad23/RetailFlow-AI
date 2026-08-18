@@ -1,0 +1,177 @@
+{
+  "_meta": {
+    "description": "Hand-crafted starter evaluation set for English intent classification. NOT extracted from real customer traffic — no real store has been onboarded yet. Built to establish a first English-only baseline before evaluating bilingual Arabic/English performance.",
+    "label_source": "hand-labeled by the developer, one label per example",
+    "language_mix": "English only",
+    "note": "This is a small starter set with 5 examples per intent (n=40). It is a baseline, not a statistically rigorous benchmark. A future bilingual evaluation set should be added separately."
+  },
+  "examples": [
+    {
+      "text": "just looking around, thanks",
+      "label": "browsing"
+    },
+    {
+      "text": "what do you have in stock right now?",
+      "label": "browsing"
+    },
+    {
+      "text": "hi",
+      "label": "browsing"
+    },
+    {
+      "text": "show me what's new",
+      "label": "browsing"
+    },
+    {
+      "text": "I'm just browsing, not looking for anything specific",
+      "label": "browsing"
+    },
+
+    {
+      "text": "how much is the red dress?",
+      "label": "asking_price"
+    },
+    {
+      "text": "what's the price of the hoodie?",
+      "label": "asking_price"
+    },
+    {
+      "text": "how much does this cost?",
+      "label": "asking_price"
+    },
+    {
+      "text": "what is the price of this jacket?",
+      "label": "asking_price"
+    },
+    {
+      "text": "is it 500 or 600 EGP?",
+      "label": "asking_price"
+    },
+
+    {
+      "text": "do you have this in size large?",
+      "label": "asking_availability"
+    },
+    {
+      "text": "is the black jacket still in stock?",
+      "label": "asking_availability"
+    },
+    {
+      "text": "do you have this in blue?",
+      "label": "asking_availability"
+    },
+    {
+      "text": "is this available in medium?",
+      "label": "asking_availability"
+    },
+    {
+      "text": "any left in medium?",
+      "label": "asking_availability"
+    },
+
+    {
+      "text": "what would you recommend for a summer outfit?",
+      "label": "wants_recommendation"
+    },
+    {
+      "text": "suggest something for a casual look",
+      "label": "wants_recommendation"
+    },
+    {
+      "text": "what goes well with black jeans?",
+      "label": "wants_recommendation"
+    },
+    {
+      "text": "can you recommend something for me?",
+      "label": "wants_recommendation"
+    },
+    {
+      "text": "help me pick something for a wedding",
+      "label": "wants_recommendation"
+    },
+
+    {
+      "text": "what material is this jacket made of?",
+      "label": "asking_details"
+    },
+    {
+      "text": "does this shirt shrink after washing?",
+      "label": "asking_details"
+    },
+    {
+      "text": "is this true to size?",
+      "label": "asking_details"
+    },
+    {
+      "text": "what fabric is this dress made from?",
+      "label": "asking_details"
+    },
+    {
+      "text": "how does the fit compare to a regular tee?",
+      "label": "asking_details"
+    },
+
+    {
+      "text": "this order arrived damaged",
+      "label": "complaint"
+    },
+    {
+      "text": "I've been waiting two weeks and nothing came",
+      "label": "complaint"
+    },
+    {
+      "text": "the size chart was wrong, this doesn't fit at all",
+      "label": "complaint"
+    },
+    {
+      "text": "my order is late and I want to know why",
+      "label": "complaint"
+    },
+    {
+      "text": "very disappointed with the quality",
+      "label": "complaint"
+    },
+
+    {
+      "text": "I'll take it, how do I pay?",
+      "label": "ready_to_buy"
+    },
+    {
+      "text": "add this to my order",
+      "label": "ready_to_buy"
+    },
+    {
+      "text": "yes, let's go with the red one, size M",
+      "label": "ready_to_buy"
+    },
+    {
+      "text": "I want to buy this now",
+      "label": "ready_to_buy"
+    },
+    {
+      "text": "confirm the order please",
+      "label": "ready_to_buy"
+    },
+
+    {
+      "text": "what are your working hours?",
+      "label": "other"
+    },
+    {
+      "text": "do you have a physical store?",
+      "label": "other"
+    },
+    {
+      "text": "can I speak to a human?",
+      "label": "other"
+    },
+    {
+      "text": "where is your store located?",
+      "label": "other"
+    },
+    {
+      "text": "what's your return policy?",
+      "label": "other"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "_meta": {
+    "description": "Hand-crafted starter evaluation set for StoreFlow emotion classification. English-only, intended as a first baseline before real customer conversation data exists.",
+    "label_source": "hand-labeled by the developer",
+    "language": "English",
+    "note": "This is a small starter evaluation set, not a statistically rigorous benchmark."
+  },
+  "examples": [
+    { "text": "I love this dress!", "label": "happy" },
+    { "text": "This is exactly what I was looking for.", "label": "happy" },
+    { "text": "Amazing, I really like it.", "label": "happy" },
+    { "text": "I'm so happy with my purchase.", "label": "happy" },
+    { "text": "This looks perfect.", "label": "happy" },
+    { "text": "Thank you, I love it.", "label": "happy" },
+    { "text": "This is great!", "label": "happy" },
+    { "text": "I'm really pleased with this.", "label": "happy" },
+
+    { "text": "I'm really angry about this.", "label": "angry" },
+    { "text": "This is unacceptable.", "label": "angry" },
+    { "text": "Why did you send me the wrong item?", "label": "angry" },
+    { "text": "I'm extremely frustrated with this service.", "label": "angry" },
+    { "text": "This is ridiculous.", "label": "angry" },
+    { "text": "I'm furious about what happened.", "label": "angry" },
+    { "text": "You completely messed up my order.", "label": "angry" },
+    { "text": "I'm very upset with your service.", "label": "angry" },
+
+    { "text": "I'm really sad about this.", "label": "sadness" },
+    { "text": "This made me very unhappy.", "label": "sadness" },
+    { "text": "I'm disappointed with my order.", "label": "sadness" },
+    { "text": "I was really hoping this would work.", "label": "sadness" },
+    { "text": "It's sad that this happened.", "label": "sadness" },
+    { "text": "I'm disappointed that it's no longer available.", "label": "sadness" },
+    { "text": "I feel terrible about this.", "label": "sadness" },
+    { "text": "This is really disappointing.", "label": "sadness" },
+
+    { "text": "I'm confused about the sizing.", "label": "confused" },
+    { "text": "I don't understand which size I should choose.", "label": "confused" },
+    { "text": "I'm not sure what you mean.", "label": "confused" },
+    { "text": "I have no idea which one is right for me.", "label": "confused" },
+    { "text": "Can you explain this to me? I'm confused.", "label": "confused" },
+    { "text": "I'm unsure about the difference between these two.", "label": "confused" },
+    { "text": "I don't know which option to pick.", "label": "confused" },
+    { "text": "This is confusing.", "label": "confused" },
+
+    { "text": "Wow, I didn't expect that!", "label": "excited" },
+    { "text": "That's amazing!", "label": "excited" },
+    { "text": "Oh wow!", "label": "excited" },
+    { "text": "I can't believe you have this!", "label": "excited" },
+    { "text": "That's a fantastic surprise.", "label": "excited" },
+    { "text": "Wow, this is exactly what I wanted!", "label": "excited" },
+    { "text": "Really? That's awesome!", "label": "excited" },
+    { "text": "I wasn't expecting that at all.", "label": "excited" },
+
+    { "text": "I'm just looking for a black dress.", "label": "neutral" },
+    { "text": "Do you have this in medium?", "label": "neutral" },
+    { "text": "How much does this cost?", "label": "neutral" },
+    { "text": "What colors are available?", "label": "neutral" },
+    { "text": "Can you tell me more about this product?", "label": "neutral" },
+    { "text": "Do you have this in stock?", "label": "neutral" },
+    { "text": "What time does the store close?", "label": "neutral" },
+    { "text": "I need help choosing a size.", "label": "neutral" }
+  ]
+}
