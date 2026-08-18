@@ -2,30 +2,105 @@
 
 An end-to-end AI sales agent for clothing stores that understands customer messages, retrieves relevant store knowledge, recommends products, maintains conversation memory, and generates personalized replies in Arabic and English.
 
-Built to demonstrate production-oriented AI engineering across the full pipeline: NLP inference, RAG, product recommendation, LLM integration, persistent memory, fault tolerance, testing, FastAPI, and Docker.
+This project demonstrates the practical engineering work required to take an AI product idea to a deployable system — not just calling an LLM, but designing for failure, testing the logic, and packaging it for reproducible deployment. It covers NLP inference, retrieval-augmented generation (RAG), product recommendation, LLM integration, persistent conversation memory, fault tolerance, automated testing, a FastAPI service layer, and Docker-based deployment.
 
+```text
+Prototype → Production-hardened core → FastAPI API → Containerized deployment (current) → Multi-tenant SaaS (planned)
+```
 
-```
-Prototype ✅  →  Production-hardened core ✅  →  FastAPI ✅  →  Docker deployment ✅  →  Multi-tenant SaaS (next)
-```
+The current system is a production-hardened core with a working API and a verified Docker deployment, built and tested against a single store's data. Multi-tenant SaaS support is the next planned phase, not yet implemented.
 
 ---
 
-## Engineering highlights
+## Demo
 
-A few decisions worth a technical reviewer's attention:
+The following is real, unedited output captured during local development and Docker-based verification testing — not a synthetic or illustrative example.
 
-- **Zero-rewrite architecture.** Storage was swapped from an in-memory dict to MongoDB, the LLM provider from HuggingFace to OpenRouter, and the entrypoint from a CLI to a FastAPI HTTP API — `core/orchestrator.py`, the pipeline's central coordinator, was never modified across any of these changes. Every module is called through a fixed function signature; nothing depends on another module's internals.
+**Turn 1 — request (`POST /chat`):**
 
-- **Every pipeline step degrades independently.** Emotion detection, intent detection, memory, RAG, and recommendations each fail closed to a safe default (e.g. neutral emotion, empty recommendation list) if their underlying call throws. Response generation — the one customer-facing step — falls back to a polite message rather than a raw error. No single component failure can break a conversation.
+```json
+{
+  "conversation_id": "test5",
+  "customer_id": "9",
+  "text": "I want a red dress in size M",
+  "channel": "web"
+}
+```
 
-- **Multi-model failover with two-layer retry.** Response generation retries transient errors (rate limits, server errors) on the current model with exponential backoff, then fails over to the next model in a configured chain if retries are exhausted. Verified live: a rate-limited primary model was automatically bypassed in favor of a working backup, with no customer-visible failure.
+**Response:**
 
-- **LLM-based fact extraction, chosen for a specific reason.** Customer messages arrive in both Arabic and English with unpredictable phrasing. A regex-based extractor would need a hand-written rule set per language and still miss most real phrasing; an LLM extractor handles both languages with one prompt. The parser is defensively written against the extractor's real observed failure modes (models returning prose instead of JSON, wrapping JSON in code fences, inventing keys) — verified with a dedicated test suite built directly from failures seen in live testing.
+```json
+{
+  "reply_text": "Great! We have the Red Summer Dress by Zara in size M — it's a lightweight floral cotton dress, perfect for warm weather, and we have 12 in stock at 1,499 EGP. Would you like to see it or try it on?",
+  "emotion": {
+    "label": "neutral",
+    "confidence": 0.59
+  },
+  "intent": {
+    "label": "asking_details",
+    "confidence": 0.57
+  },
+  "recommendations": [
+    {
+      "product_id": "prod_001",
+      "name": "Red Summer Dress",
+      "price": 1499,
+      "reason": "Matches your query well (score: 0.61)."
+    },
+    {
+      "product_id": "prod_002",
+      "name": "Black Oversized Hoodie",
+      "price": 1299,
+      "reason": "Matches your query well (score: 0.42)."
+    }
+  ]
+}
+```
 
-- **Self-contained, reproducible deployment.** The Docker image pre-downloads all local ML models and pre-builds the RAG vector index at *build time*, not first request — the container never depends on an external service being reachable at cold start. Verified end-to-end: conversation memory correctly persisted across two separate HTTP requests through the containerized MongoDB instance, confirmed via Docker's internal service-name networking (a common misconfiguration point that was caught and fixed during testing).
+**Known-facts extraction for the same message** (logged to conversation memory, not part of the API response):
 
-- **Tests catch real bugs, not just coverage.** The unit test suite found a live type-safety regression (a `Literal` type constraint that had silently reverted to an unrestricted `str`) and was subsequently extended to directly reproduce and guard against a bug seen in production output (a case-sensitive attribute typo silently breaking analytics logging on every request until caught).
+```json
+{
+  "preferred_size": "M",
+  "preferred_color": "red",
+  "mentioned_products": ["dress"]
+}
+```
+
+**Turn 2 — same `conversation_id`, testing memory recall:**
+
+```json
+{
+  "text": "what did I just ask for?"
+}
+```
+
+**Response:**
+
+```json
+{
+  "reply_text": "You asked for a red dress in size M — and I showed you the Red Summer Dress by Zara in that exact size and color. Would you like to see it or try it on?",
+  "emotion": {
+    "label": "excited",
+    "confidence": 0.61
+  },
+  "intent": {
+    "label": "complaint",
+    "confidence": 0.57
+  },
+  "recommendations": [],
+  "retrieved_context": []
+}
+```
+
+The reply correctly recalls the prior turn, confirming that conversation memory persisted through two separate HTTP requests. The intent classifier incorrectly labeled the neutral follow-up as `complaint`. This is consistent with the measured intent-classification errors reported in the Evaluation section and is intentionally left unedited to show an actual system failure rather than a curated demo.
+
+**Bilingual fact extraction** — verified separately against the fact-extraction module:
+
+```text
+Input:  "عايز جاكيت أسود مقاس لارج"
+Output: { "preferred_size": "L", "preferred_color": "black", "mentioned_products": ["jacket"] }
+```
 
 ---
 
@@ -33,71 +108,199 @@ A few decisions worth a technical reviewer's attention:
 
 For each customer message, the pipeline:
 
-1. **Detects emotion** — local HuggingFace DistilRoBERTa classifier
+1. **Detects emotion** — local HuggingFace DistilRoBERTa classifier with six application-level emotion labels
 2. **Detects intent** — local zero-shot BART classifier against a fixed intent taxonomy
 3. **Loads conversation memory** — per-conversation history and known facts, persisted in MongoDB
-4. **Retrieves store knowledge** — semantic search (RAG) over products, policies, FAQ, and store info
+4. **Retrieves store knowledge** — semantic search (RAG) over products, policies, FAQ, and store information
 5. **Recommends products** — intent-aware filtering of retrieved items, with real names and prices
-6. **Generates a reply** — via OpenRouter, with a multi-model failover chain
-7. **Updates memory** — appends the turn, and extracts known facts (size, color, budget) from the message
-8. **Logs the turn** — appended to a JSONL analytics file for future fine-tuning and reporting
+6. **Generates a reply** — via OpenRouter, with a multi-model retry-and-failover chain
+7. **Updates memory** — appends the turn and extracts known facts such as size, color, and budget
+8. **Logs the turn** — appended to a JSONL analytics file, intended as a future source for evaluation and fine-tuning data
+
+---
+
+## Key Engineering Decisions
+
+- **Stable module boundaries.** Storage was swapped from an in-memory dict to MongoDB, the LLM provider from HuggingFace to OpenRouter, and the entrypoint from a CLI to a FastAPI HTTP API. `core/orchestrator.py`, the pipeline's coordinator, required no changes across these swaps. Modules communicate through typed interfaces, while business-flow coordination remains centralized in the orchestrator.
+
+- **Independent failure handling per pipeline step.** Emotion detection, intent detection, memory access, RAG retrieval, and recommendation each catch their own exceptions and fall back to a safe default rather than propagating the failure. Response generation, the customer-facing step, falls back to a fixed polite message if every model in its chain fails.
+
+- **Retry plus multi-model failover for response generation.** Transient errors such as rate limits and server errors are retried on the current model with exponential backoff before the pipeline moves to the next model in a configured chain. This was verified during live testing: a rate-limited primary model was automatically bypassed in favor of a working backup without a customer-visible failure.
+
+- **LLM-based fact extraction for bilingual input.** Customer messages arrive in Arabic and English with unpredictable phrasing. An LLM-based extractor handles both from a single prompt. The output parser is defensive against failure modes observed during testing, including prose instead of JSON, JSON wrapped in code fences, and invented keys. These cases are covered by dedicated unit tests.
+
+- **Self-contained Docker deployment.** The image pre-downloads local ML models and pre-builds the RAG vector index at build time rather than on first request, so the container does not depend on an external service being reachable at cold start. The deployment was verified end-to-end, including MongoDB-backed memory across separate HTTP requests.
+
+- **Tests that found real defects, not just coverage.** The unit test suite caught a live type-safety regression — a `Literal` role constraint that had silently reverted to an unrestricted `str` — before deployment. It was later extended to reproduce a bug observed in production output involving a case-sensitive attribute typo that silently broke analytics logging.
 
 ---
 
 ## Architecture
 
-```
+```text
 HTTP request (POST /chat)
       │
       ▼
-api.py  ── thin FastAPI wrapper, no business logic
+api.py  ── thin FastAPI transport layer: request/response (de)serialization only
       │
       ▼
-core/orchestrator.py  ── owns the pipeline flow; never modified across any module swap
+core/orchestrator.py  ── owns business-flow coordination
       │
-      ├── emotion/emotion_detector.py            → EmotionResult
-      ├── intent/intent_detector.py              → IntentResult
-      ├── memory/conversation_memory.py          → MemoryState (MongoDB)
-      ├── rag/retriever.py                       → list[RetrievedChunk]
-      ├── recommendation/product_recommender.py  → list[ProductRecommendation]
-      ├── response/response_generator.py         → reply text (OpenRouter, retry + failover)
-      ├── memory/fact_extractor.py               → known facts (LLM extraction)
-      └── analytics/conversation_logger.py       → JSONL log
+      ├── emotion/emotion_detector.py
+      │       → EmotionResult
+      │       → local model
+      │
+      ├── intent/intent_detector.py
+      │       → IntentResult
+      │       → local model
+      │
+      ├── memory/conversation_memory.py
+      │       → MemoryState
+      │       → MongoDB
+      │
+      ├── rag/retriever.py
+      │       → list[RetrievedChunk]
+      │       → local embeddings
+      │
+      ├── recommendation/product_recommender.py
+      │       → list[ProductRecommendation]
+      │
+      ├── response/response_generator.py
+      │       → reply text
+      │       → external LLM + retry/failover
+      │
+      ├── memory/fact_extractor.py
+      │       → known facts
+      │       → external LLM
+      │
+      └── analytics/conversation_logger.py
+              → JSONL log
 ```
 
-Modules never call each other directly — only the orchestrator knows the flow, and each module exposes a single typed function. This is the boundary that made every major swap so far a one-file change.
+FastAPI's responsibility is transport: parsing the incoming request into a validated `CustomerMessage` and serializing the returned `AgentReply`.
+
+All business logic — including operation order and failure-handling policy — lives in the orchestrator. Each downstream module has a single isolated responsibility and exposes a typed interface.
+
+The split between local and external inference is deliberate: emotion detection, intent detection, and RAG retrieval run locally, while response generation and fact extraction are delegated to an external LLM through OpenRouter.
+
+MongoDB is the persistent store for per-conversation history and extracted known facts.
 
 ---
 
-## Project structure
+## Engineering Trade-offs
 
-```
+| Decision | Why | Trade-off |
+|---|---|---|
+| Local emotion/intent models | Avoids external latency and per-request cost for classification tasks | Lower accuracy ceiling than a larger hosted or fine-tuned model |
+| Zero-shot intent classification (BART-MNLI) | No labeled conversation data exists yet; allows intent detection without a training pipeline | Current English-only starter evaluation achieved 70.0% accuracy and 0.67 macro F1 on n=40 |
+| Semantic RAG over structured store data | Handles natural-language queries without hand-written matching rules | Cannot answer aggregate questions such as "how many products do you have?" |
+| MongoDB for conversation memory | Document model matches conversation state and persists across restarts | Adds an operational dependency |
+| LLM-based fact extraction | Handles Arabic and English phrasing without separate rule sets | Adds one model call per turn and may occasionally fail to produce structured output |
+| Multi-model failover chain | Keeps conversations working when individual free-tier models rate-limit | Free-tier models can still rate-limit under sustained concurrent traffic |
+| Central orchestrator | Keeps operation order and failure-handling policy in one place | Requires stable typed interfaces between modules |
+
+---
+
+## Evaluation
+
+The project has deterministic unit test coverage, manual end-to-end verification, and dedicated model-level evaluation scripts for intent and emotion classification.
+
+The current evaluation datasets are **small, hand-crafted starter sets**, not real customer traffic. They are intended as honest baselines rather than rigorous production benchmarks. As real conversation data becomes available, these datasets should be expanded or replaced with representative labeled examples.
+
+### Intent Classification
+
+The intent classifier is evaluated using:
+
+- **40** hand-labeled English examples
+- **8** intent classes
+- **5 examples per class**
+- `facebook/bart-large-mnli`
+- Zero-shot classification
+- Accuracy, macro F1, precision, recall, and confusion matrix
+
+Latest measured baseline:
+
+- **Accuracy: 70.0%**
+- **Macro F1: 0.67**
+- **n = 40**
+
+The main observed weaknesses are `browsing`, `wants_recommendation`, `ready_to_buy`, and `other`, with several classes being confused with semantically similar intents.
+
+The result should be treated as a baseline rather than a production benchmark because the evaluation set is small and hand-crafted.
+
+### Emotion Classification
+
+The emotion classifier is evaluated using:
+
+- **48** hand-labeled English examples
+- **6** application-level emotion classes
+- **8 examples per class**
+- `j-hartmann/emotion-english-distilroberta-base`
+- Accuracy, macro F1, precision, recall, and confusion matrix
+
+Latest measured baseline:
+
+- **Accuracy: 75.0%**
+- **Macro F1: 0.72**
+- **n = 48**
+
+The strongest class in the current evaluation is `angry`, while the main weakness is `confused`, which achieved only **0.12 recall**. Confused examples were frequently classified as `neutral` or `excited`.
+
+### Evaluation Scope
+
+Current quantitative evaluation covers only emotion and intent classification.
+
+The following areas have not yet received formal quantitative evaluation:
+
+- **RAG retrieval** — recall@k and relevance judgments
+- **Recommendation** — precision@k
+- **Fact extraction** — field-level precision and recall
+- **Response generation** — groundedness and human quality review
+- **API performance** — p50 / p95 latency
+- **Reliability** — error rate and fallback-path trigger rate
+- **Cost** — LLM cost per conversation
+
+All performance numbers reported in this README are tied to a defined evaluation dataset and sample size. Future numbers should follow the same standard.
+
+---
+
+## Project Structure
+
+```text
 StoreFlowAI/
 ├── app/
 │   ├── main.py                        # CLI entrypoint (dev tool)
 │   ├── api.py                         # FastAPI entrypoint
-│   ├── config.py                      # central settings (pydantic-settings)
-│   ├── logging_config.py              # centralized logging setup
-│   ├── core/orchestrator.py           # pipeline flow, per-step error handling
-│   ├── schemas/models.py              # shared Pydantic data contracts + validation
+│   ├── config.py                      # central settings
+│   ├── logging_config.py              # centralized logging
+│   ├── core/orchestrator.py           # pipeline flow + error handling
+│   ├── schemas/models.py              # shared Pydantic contracts
 │   ├── emotion/emotion_detector.py
 │   ├── intent/intent_detector.py
 │   ├── memory/
 │   │   ├── conversation_memory.py     # MongoDB-backed memory
 │   │   └── fact_extractor.py          # LLM-based fact extraction
 │   ├── rag/
-│   │   ├── build_embeddings.py        # offline: build the vector index
-│   │   └── retriever.py               # runtime: semantic search
-│   ├── recommendation/product_recommender.py
-│   ├── response/response_generator.py # OpenRouter + retry + model failover chain
-│   └── analytics/conversation_logger.py
+│   │   ├── build_embeddings.py        # offline vector-index builder
+│   │   └── retriever.py               # runtime semantic search
+│   ├── recommendation/
+│   │   └── product_recommender.py
+│   ├── response/
+│   │   └── response_generator.py      # OpenRouter + retry/failover
+│   └── analytics/
+│       └── conversation_logger.py
 ├── data/
-│   ├── raw/                           # products.json, policies.json, faq.json, store_info.json
+│   ├── raw/                           # products, policies, FAQ, store info
 │   ├── embeddings/                    # generated vector index (gitignored)
 │   └── analytics/                     # conversation logs (gitignored)
-├── tests/                             # pytest unit tests (30+)
-├── Dockerfile                         # self-contained image, models pre-baked
-├── docker-compose.yml                 # app + MongoDB
+├── eval/
+│   ├── data/                          # labeled evaluation datasets
+│   ├── results/                       # timestamped evaluation results
+│   ├── evaluate_intent.py
+│   └── evaluate_emotion.py
+├── tests/                             # pytest unit tests
+├── Dockerfile
+├── docker-compose.yml
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -105,25 +308,28 @@ StoreFlowAI/
 
 ---
 
-## Tech stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| API | FastAPI, uvicorn |
-| Data validation / config | Pydantic, pydantic-settings |
-| Emotion & intent detection | HuggingFace Transformers (local inference) |
-| RAG embeddings | Sentence-Transformers (local inference) |
-| Response generation | OpenRouter (OpenAI-compatible API), multi-model failover |
-| Retry logic | tenacity |
+| API | FastAPI, Uvicorn |
+| Data validation / configuration | Pydantic, pydantic-settings |
+| Emotion detection | `j-hartmann/emotion-english-distilroberta-base` |
+| Intent detection | `facebook/bart-large-mnli` zero-shot classification |
+| RAG embeddings | Sentence-Transformers |
+| Response generation | OpenRouter, OpenAI-compatible API |
+| Fact extraction | OpenRouter |
+| Retry logic | Tenacity |
 | Conversation memory | MongoDB |
-| Testing | pytest |
+| Testing | Pytest |
+| Evaluation | scikit-learn |
 | Containerization | Docker, Docker Compose |
 
 ---
 
 ## Running with Docker
 
-The image is self-contained — models and the RAG index are built in, so no manual setup is needed after `docker-compose up`.
+The image is self-contained — local models and the RAG index are prepared at image build time.
 
 ```bash
 cp .env.example .env
@@ -133,39 +339,110 @@ docker-compose up -d --build
 ```
 
 Verify:
-```
+
+```text
 http://localhost:8000/health
 http://localhost:8000/docs
 ```
 
-## Running locally (development)
+---
 
-```bash
+## Running Locally
+
+```powershell
 python -m venv venv
-.\venv\Scripts\Activate.ps1        # Windows
-# source venv/bin/activate         # macOS/Linux
-
-pip install -r requirements.txt
-cp .env.example .env               # fill in OPENROUTER_API_KEY, MONGO_URI
-
-docker-compose up -d mongo         # MongoDB only
-python -m app.rag.build_embeddings # build the RAG index once
-
-python -m app.main                 # CLI
-# or
-uvicorn app.api:app --reload       # API with auto-reload
+.\venv\Scripts\Activate.ps1
 ```
+
+Install dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+Configure environment variables:
+
+```powershell
+cp .env.example .env
+```
+
+Start MongoDB:
+
+```powershell
+docker-compose up -d mongo
+```
+
+Build the RAG index once:
+
+```powershell
+python -m app.rag.build_embeddings
+```
+
+Run the CLI:
+
+```powershell
+python -m app.main
+```
+
+Or run the FastAPI API:
+
+```powershell
+uvicorn app.api:app --reload
+```
+
+---
+
+## Model Evaluation
+
+### Intent
+
+Run:
+
+```powershell
+python -m eval.evaluate_intent
+```
+
+The script:
+
+- loads the labeled intent dataset
+- runs the actual `detect_intent()` implementation
+- reports overall accuracy
+- reports per-class precision/recall/F1
+- prints a confusion matrix
+- saves a timestamped JSON result under `eval/results/`
+
+### Emotion
+
+Run:
+
+```powershell
+python -m eval.evaluate_emotion
+```
+
+The script follows the same evaluation pattern for the emotion classifier.
+
+These evaluation scripts are intentionally separate from pytest because they measure model behavior rather than deterministic application logic.
 
 ---
 
 ## API
 
 ### `GET /health`
-Liveness check. Returns `{"status": "ok"}` without touching MongoDB or any model.
+
+Liveness check. Returns:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+The endpoint does not require MongoDB or model inference.
 
 ### `POST /chat`
 
 **Request:**
+
 ```json
 {
   "conversation_id": "c1",
@@ -176,65 +453,143 @@ Liveness check. Returns `{"status": "ok"}` without touching MongoDB or any model
 ```
 
 **Response:**
+
 ```json
 {
   "conversation_id": "c1",
   "reply_text": "...",
-  "emotion": { "label": "happy", "confidence": 0.92, "scores": {} },
-  "intent": { "label": "wants_recommendation", "confidence": 0.85 },
+  "emotion": {
+    "label": "happy",
+    "confidence": 0.92,
+    "scores": {}
+  },
+  "intent": {
+    "label": "wants_recommendation",
+    "confidence": 0.85
+  },
   "recommendations": [
-    { "product_id": "prod_001", "name": "Red Summer Dress", "price": 1499, "reason": "..." }
+    {
+      "product_id": "prod_001",
+      "name": "Red Summer Dress",
+      "price": 1499,
+      "reason": "..."
+    }
   ],
-  "retrieved_context": [ { "content": "...", "source": "prod_001", "score": 0.61 } ]
+  "retrieved_context": [
+    {
+      "content": "...",
+      "source": "prod_001",
+      "score": 0.61
+    }
+  ]
 }
 ```
 
-Full interactive documentation is auto-generated at `/docs`.
+Full interactive API documentation is automatically generated at `/docs`.
 
 ---
 
 ## Testing
 
-```bash
+Run:
+
+```powershell
 python -m pytest -v
 ```
 
-30+ deterministic unit tests, running in under a second — no models, no network, no database required:
+The deterministic unit test suite contains 30+ tests and runs without models, network access, or a database.
 
-- **`test_schemas.py`** — input validation: blank/empty rejection, over-length truncation, control-character stripping
-- **`test_recommender.py`** — recommendation filtering: intent gating, similarity threshold, source-type filtering
-- **`test_fact_extractor.py`** — JSON parsing robustness against real observed LLM failure modes
+Current coverage includes:
+
+- **`test_schemas.py`** — input validation: blank/empty rejection, over-length handling, control-character stripping
+- **`test_recommender.py`** — recommendation filtering: intent gating, similarity threshold, and source-type filtering
+- **`test_fact_extractor.py`** — robust JSON parsing against observed LLM failure modes
+
+The pytest suite covers deterministic application logic.
+
+Model-dependent behavior is evaluated separately through the dedicated intent and emotion evaluation scripts.
+
+RAG retrieval quality and response-generation quality are still primarily verified through manual testing.
 
 ---
 
-## Design principles
+## Design Principles
 
 - **One responsibility per module.**
-- **Evolve without rewriting** — every dependency swap so far has been isolated to a single module.
-- **Fail gracefully** — every pipeline step is independently fault-tolerant.
-- **Explicit trade-offs** — limitations are documented, not hidden.
-- **Build for the current phase** — no infrastructure added before it's needed.
+- **Stable interfaces over convenience.**
+- **Fail gracefully.**
+- **Measure before optimizing.**
+- **Explicit trade-offs.**
+- **Real failures are documented rather than hidden.**
+- **Build for the current phase without premature infrastructure.**
 
 ---
 
-## Known limitations
+## Known Limitations
 
-- **RAG cannot answer aggregate questions** (e.g. "how many products total?"). Semantic search finds similar items, not counts — this requires structured tool-calling, planned for a later phase.
-- **Free-tier OpenRouter models rate-limit under load.** The failover chain cushions this; a production deployment at real volume should place a paid model first.
-- **Fact extraction occasionally misses on free models** that return prose instead of structured JSON — handled safely (no facts extracted that turn), never corrupts existing memory.
-- **Zero-shot intent classification has a real error rate** — no training data exists yet to fine-tune against.
-- **Single-tenant** — no `tenant_id` isolation yet; one deployment serves one store.
+- **RAG cannot answer aggregate questions** such as "how many products do you have?" Semantic retrieval finds relevant documents rather than performing database aggregation. Structured tool-calling would be required for this.
+
+- **Zero-shot intent classification has a measurable error rate.** The current English-only starter evaluation achieved **70.0% accuracy and 0.67 macro F1 on n=40**. The dataset is small and hand-crafted, so this is a baseline rather than a production benchmark.
+
+- **Emotion classification has a measurable error rate.** The current English-only starter evaluation achieved **75.0% accuracy and 0.72 macro F1 on n=48**. The `confused` class is particularly weak, with **0.12 recall** in the current evaluation.
+
+- **Free-tier OpenRouter models rate-limit under load.** The failover chain mitigates this for moderate use. Production traffic should use a reliable paid model as the primary provider, with free-tier models as secondary fallbacks at most.
+
+- **Fact extraction occasionally fails on free-tier models.** Some models return prose instead of structured JSON. The parser handles this safely by rejecting invalid output without overwriting existing memory, but the fact may be missed for that turn.
+
+- **English-first model evaluation.** The current formal evaluation datasets are English-only. Arabic support is implemented in parts of the pipeline and has been manually verified for fact extraction, but Arabic intent and emotion performance have not yet been formally measured.
+
+- **Single-tenant.** There is currently no `tenant_id` isolation. The deployment serves one store's data per instance. Multi-tenant architecture is planned but not implemented.
 
 ---
 
 ## Roadmap
 
-**Shipped:** prototype pipeline · production hardening (error handling, retry + failover, input validation, LLM fact extraction, structured logging, tests) · FastAPI API · Docker deployment, verified end-to-end.
+### Completed
 
-**Next:** onboard a first real store · structured tool-calling for inventory queries · WhatsApp/Instagram integrations · multi-tenant architecture.
+- End-to-end AI sales-agent pipeline
+- Emotion detection
+- Intent detection
+- RAG retrieval
+- Product recommendation
+- Conversation memory
+- LLM-based fact extraction
+- Response generation
+- Per-step production hardening
+- Retry and multi-model failover
+- Input validation
+- Structured logging
+- Unit tests
+- FastAPI service layer
+- Docker deployment
+- MongoDB-backed persistent memory
+- End-to-end Docker verification
+- Initial quantitative evaluation for intent classification
+- Initial quantitative evaluation for emotion classification
+
+### Planned
+
+- Expand evaluation with real labeled customer conversations
+- Arabic-specific intent and emotion evaluation
+- Improve intent classification using better label definitions and/or supervised training once sufficient labeled data exists
+- Formal RAG retrieval evaluation
+- Recommendation evaluation
+- Fact-extraction evaluation
+- Response-quality evaluation
+- API latency and reliability benchmarks
+- Structured tool-calling for inventory and aggregate queries
+- WhatsApp integration
+- Instagram integration
+- Multi-tenant architecture
 
 ---
 
 ## License
 
 Proprietary — all rights reserved.
+
+
+## 👨‍💻 Author
+Basem Morad
+AI/ML Engineer | Computer Vision Specialist
+B.Sc. Mechatronics Engineering
