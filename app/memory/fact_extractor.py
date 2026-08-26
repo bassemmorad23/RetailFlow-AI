@@ -22,17 +22,34 @@ here" — NOT "the customer no longer has a size preference". Returning
 None for it would wipe a fact we already knew. So we return only the
 keys that were actually found, and the caller merges rather than replaces.
 
+WHY THIS NOW HAS THE SAME RETRY + FAILOVER CHAIN AS response_generator.py:
+Originally this called only the FIRST model in the chain, once, with no
+retry. That meant a rate-limited primary model made fact extraction fail
+for that turn even though a backup model was available and working —
+exactly the gap response_generator.py's failover chain already solves
+for response generation. This module now uses the identical two-layer
+pattern: retry transient errors on the current model with backoff, then
+move to the next model in the chain if it's still failing.
+
 FAILURE MODE:
-Extraction is best-effort. If the model fails, returns malformed JSON, or
-times out, we return an empty dict and the conversation continues with
-whatever facts we already had. A failed extraction must never break a
-customer conversation.
+Extraction is best-effort. If every model in the chain fails, returns
+malformed JSON, or times out, we return an empty dict and the conversation
+continues with whatever facts we already had. A failed extraction must
+never break a customer conversation.
 """
 
 import json
 import logging
 
 from openai import OpenAI
+from openai import APIStatusError, APITimeoutError, APIConnectionError
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.config import settings
 
@@ -71,8 +88,6 @@ Message: "do you ship to Alexandria?"
 Message: "looking for jackets under 3000"
 {"budget_max": 3000, "mentioned_products": ["jacket"]}"""
 
-# Only these keys are accepted from the model. Anything else it invents
-# is discarded — the model does not get to define our schema.
 _ALLOWED_KEYS = {
     "preferred_size",
     "preferred_color",
@@ -80,45 +95,71 @@ _ALLOWED_KEYS = {
     "mentioned_products",
 }
 
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """True only for transient errors worth retrying on the SAME model."""
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in _RETRYABLE_STATUS_CODES
+    return isinstance(exc, (APITimeoutError, APIConnectionError))
+
+
+@retry(
+    retry=retry_if_exception(_is_retryable),
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+def _call_single_model(model: str, text: str) -> str:
+    """
+    One model, with per-model retry on transient errors. Raises if it
+    still fails — the caller moves to the next model in the chain.
+    """
+    response = _client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": _EXTRACTION_PROMPT},
+            {"role": "user", "content": text},
+        ],
+        max_tokens=200,
+        temperature=0.0,
+    )
+    
+    if not response.choices:
+        raise ValueError(f"Model {model} returned no choices in response.")
+
+    return response.choices[0].message.content.strip()
+
 
 def extract_facts(text: str) -> dict:
     """
     Extract explicitly-stated shopping preferences from a customer message.
 
-    Returns a dict containing ONLY the facts found — keys that weren't
-    mentioned are absent, never None. Returns {} on any failure.
+    Tries each model in settings.response_model_chain in order, same
+    failover pattern as response_generator.py. Returns {} if the text is
+    empty, or if EVERY model in the chain fails.
     """
     if not text or not text.strip():
         return {}
 
-    try:
-        response = _client.chat.completions.create(
-            model=settings.response_model_chain[0],
-            messages=[
-                {"role": "system", "content": _EXTRACTION_PROMPT},
-                {"role": "user", "content": text},
-            ],
-            max_tokens=200,
-            temperature=0.0,  # deterministic: extraction, not creativity
-        )
-        raw = response.choices[0].message.content.strip()
+    for model in settings.response_model_chain:
+        try:
+            raw = _call_single_model(model, text)
+            return _parse_facts(raw)
+        except Exception:
+            logger.warning("Fact extraction model failed, trying next: %s", model, exc_info=True)
+            continue
 
-    except Exception:
-        logger.warning("Fact extraction call failed.", exc_info=True)
-        return {}
-
-    return _parse_facts(raw)
+    logger.warning("Fact extraction: all models in the chain failed.")
+    return {}
 
 
 def _parse_facts(raw: str) -> dict:
     """
     Parse the model's response into a clean facts dict.
-
-    Defensive at every step: models wrap JSON in code fences, invent keys,
-    return the wrong types, or return prose instead of JSON. Any of those
-    yields {} rather than corrupt data in the customer's memory.
     """
-    # Models often wrap JSON in ```json ... ``` despite being told not to.
     cleaned = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
     try:
@@ -135,9 +176,9 @@ def _parse_facts(raw: str) -> dict:
 
     for key, value in parsed.items():
         if key not in _ALLOWED_KEYS:
-            continue  # model invented a key; ignore it
+            continue
         if value is None:
-            continue  # "not mentioned" — must not overwrite existing fact
+            continue
 
         if key == "budget_max":
             try:

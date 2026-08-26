@@ -101,6 +101,12 @@ def _call_single_model(model: str, messages: list[dict]) -> str:
         max_tokens=256,
         temperature=0.7,
     )
+    
+    if not response.choices:
+        raise ValueError(f"Model {model} returned no choices in response.")
+    
+    
+    
     return response.choices[0].message.content.strip()
 
 
@@ -188,7 +194,6 @@ def _build_user_prompt(
         for rec in recommendations:
             lines.append(f"  - {rec.name}: {rec.reason}")
 
-    lines.append(f"\nCustomer message: \"{message.text}\"")
     lines.append("\nYour reply:")
 
     return "\n".join(lines)

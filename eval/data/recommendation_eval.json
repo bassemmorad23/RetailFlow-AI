@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "description": "Recommendation evaluation set. Uses REAL retrieve_context() output combined with a MANUALLY ASSIGNED intent label, deliberately bypassing the real intent classifier so this measures recommend_products() in isolation from intent-classification error (already measured separately).",
+    "scoring_note": "expected_product_id is null for cases where NO recommendation should be produced: non-product queries, out-of-catalog queries, and the intent-gating safety case (a complaint about a real product should NOT trigger a recommendation).",
+    "gap_zone_note": "retriever.py's own filter is 0.35; product_recommender.py's filter is 0.4 (stricter). Cases 7-10 use vaguer phrasing specifically to check whether real matches fall into that 0.35-0.4 gap, where retrieval finds something but the recommender silently excludes it."
+  },
+  "examples": [
+    { "text": "do you have a red dress?", "intent_label": "wants_recommendation", "expected_product_id": "prod_001" },
+    { "text": "I want something floral for summer", "intent_label": "wants_recommendation", "expected_product_id": "prod_001" },
+    { "text": "show me black hoodies", "intent_label": "wants_recommendation", "expected_product_id": "prod_002" },
+    { "text": "I'm looking for slim fit jeans", "intent_label": "wants_recommendation", "expected_product_id": "prod_003" },
+    { "text": "do you sell basic white t-shirts?", "intent_label": "wants_recommendation", "expected_product_id": "prod_004" },
+    { "text": "any cargo pants available?", "intent_label": "wants_recommendation", "expected_product_id": "prod_005" },
+
+    { "text": "something for summer, maybe a dress", "intent_label": "wants_recommendation", "expected_product_id": "prod_001" },
+    { "text": "got any jackets in stock?", "intent_label": "wants_recommendation", "expected_product_id": null },
+    { "text": "warm layer for winter, hoodie style", "intent_label": "wants_recommendation", "expected_product_id": "prod_002" },
+    { "text": "denim pants, slim cut", "intent_label": "wants_recommendation", "expected_product_id": "prod_003" },
+
+    { "text": "how long does shipping take?", "intent_label": "asking_details", "expected_product_id": null },
+    { "text": "what are your store hours?", "intent_label": "asking_details", "expected_product_id": null },
+
+    { "text": "this red dress arrived damaged", "intent_label": "complaint", "expected_product_id": null },
+
+    { "text": "do you sell shoes?", "intent_label": "wants_recommendation", "expected_product_id": null }
+  ]
+}

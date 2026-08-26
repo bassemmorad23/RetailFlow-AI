@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "description": "Hand-crafted starter evaluation set for LLM-based fact extraction. English only, matching current project scope. Includes deliberate negative examples (no extractable facts) to measure hallucination rate, not just recall.",
+    "label_source": "hand-labeled by the developer",
+    "fields_evaluated": ["preferred_size", "preferred_color", "budget_max", "mentioned_products"],
+    "note": "Null/absent means the field should NOT be extracted for that example. This is the ground truth used to detect both misses (false negatives) and hallucinations (false positives)."
+  },
+  "examples": [
+    { "text": "I want a red dress in size M", "expected": { "preferred_size": "M", "preferred_color": "red", "budget_max": null, "mentioned_products": ["dress"] } },
+    { "text": "do you have this jacket in black?", "expected": { "preferred_size": null, "preferred_color": "black", "budget_max": null, "mentioned_products": ["jacket"] } },
+    { "text": "looking for shoes under 1500 EGP", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": 1500, "mentioned_products": ["shoes"] } },
+    { "text": "I'm usually a large, do you have anything in that size?", "expected": { "preferred_size": "L", "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "what's the price of the hoodie?", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": ["hoodie"] } },
+    { "text": "do you have anything under 2000 EGP for guys?", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": 2000, "mentioned_products": [] } },
+    { "text": "I want a blue shirt, budget around 800", "expected": { "preferred_size": null, "preferred_color": "blue", "budget_max": 800, "mentioned_products": ["shirt"] } },
+    { "text": "size small please", "expected": { "preferred_size": "S", "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "extra large jacket in grey", "expected": { "preferred_size": "XL", "preferred_color": "grey", "budget_max": null, "mentioned_products": ["jacket"] } },
+    { "text": "hi, just checking out your store", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "what are your opening hours?", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "do you ship internationally?", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "thanks for your help", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "I'll take the black hoodie in large", "expected": { "preferred_size": "L", "preferred_color": "black", "budget_max": null, "mentioned_products": ["hoodie"] } },
+    { "text": "any pants under 1000?", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": 1000, "mentioned_products": ["pants"] } },
+    { "text": "show me green dresses", "expected": { "preferred_size": null, "preferred_color": "green", "budget_max": null, "mentioned_products": ["dress"] } },
+    { "text": "I need a medium sized jacket", "expected": { "preferred_size": "M", "preferred_color": null, "budget_max": null, "mentioned_products": ["jacket"] } },
+    { "text": "what colors does the t-shirt come in?", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": ["t-shirt"] } },
+    { "text": "my budget is 3000 EGP max", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": 3000, "mentioned_products": [] } },
+    { "text": "hoodie and jeans please", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": ["hoodie", "jeans"] } },
+    { "text": "can I get this in size 42?", "expected": { "preferred_size": "42", "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "I don't have a specific budget", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": [] } },
+    { "text": "I want the black one in size small", "expected": { "preferred_size": "S", "preferred_color": "black", "budget_max": null, "mentioned_products": [] } },
+    { "text": "cancel my order", "expected": { "preferred_size": null, "preferred_color": null, "budget_max": null, "mentioned_products": [] } }
+  ]
+}

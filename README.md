@@ -189,78 +189,64 @@ MongoDB is the persistent store for per-conversation history and extracted known
 
 ## Engineering Trade-offs
 
-| Decision | Why | Trade-off |
-|---|---|---|
-| Local emotion/intent models | Avoids external latency and per-request cost for classification tasks | Lower accuracy ceiling than a larger hosted or fine-tuned model |
+| Decision                                    | Why                                                                                          | Trade-off                                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Local emotion/intent models                 | Avoids external latency and per-request cost for classification tasks                        | Lower accuracy ceiling than a larger hosted or fine-tuned model                           |
 | Zero-shot intent classification (BART-MNLI) | No labeled conversation data exists yet; allows intent detection without a training pipeline | Current English-only starter evaluation achieved 70.0% accuracy and 0.67 macro F1 on n=40 |
-| Semantic RAG over structured store data | Handles natural-language queries without hand-written matching rules | Cannot answer aggregate questions such as "how many products do you have?" |
-| MongoDB for conversation memory | Document model matches conversation state and persists across restarts | Adds an operational dependency |
-| LLM-based fact extraction | Handles Arabic and English phrasing without separate rule sets | Adds one model call per turn and may occasionally fail to produce structured output |
-| Multi-model failover chain | Keeps conversations working when individual free-tier models rate-limit | Free-tier models can still rate-limit under sustained concurrent traffic |
-| Central orchestrator | Keeps operation order and failure-handling policy in one place | Requires stable typed interfaces between modules |
+| Semantic RAG over structured store data     | Handles natural-language queries without hand-written matching rules                         | Cannot answer aggregate questions such as "how many products do you have?"                |
+| MongoDB for conversation memory             | Document model matches conversation state and persists across restarts                       | Adds an operational dependency                                                            |
+| LLM-based fact extraction                   | Handles Arabic and English phrasing without separate rule sets                               | Adds one model call per turn and may occasionally fail to produce structured output       |
+| Multi-model failover chain                  | Keeps conversations working when individual free-tier models rate-limit                      | Free-tier models can still rate-limit under sustained concurrent traffic                  |
+| Central orchestrator                        | Keeps operation order and failure-handling policy in one place                               | Requires stable typed interfaces between modules                                          |
 
 ---
 
 ## Evaluation
 
-The project has deterministic unit test coverage, manual end-to-end verification, and dedicated model-level evaluation scripts for intent and emotion classification.
+The project has deterministic unit test coverage, manual end-to-end verification, and dedicated evaluation scripts for every ML-dependent component: intent, emotion, fact extraction, RAG retrieval, and recommendation.
 
-The current evaluation datasets are **small, hand-crafted starter sets**, not real customer traffic. They are intended as honest baselines rather than rigorous production benchmarks. As real conversation data becomes available, these datasets should be expanded or replaced with representative labeled examples.
+All datasets are small, hand-crafted starter sets, not real customer traffic. They are honest baselines, not production benchmarks. As real conversation data becomes available, they should be expanded or replaced.
 
-### Intent Classification
+### Intent Classification (n=40)
 
-The intent classifier is evaluated using:
+- Accuracy: **70.0%**, Macro F1: **0.67**
+- Model: `facebook/bart-large-mnli`, zero-shot classification
+- Weakest areas: `browsing`, `wants_recommendation`, `ready_to_buy`, `other`
 
-- **40** hand-labeled English examples
-- **8** intent classes
-- **5 examples per class**
-- `facebook/bart-large-mnli`
-- Zero-shot classification
-- Accuracy, macro F1, precision, recall, and confusion matrix
+### Emotion Classification (n=48)
 
-Latest measured baseline:
+- Accuracy: **75.0%**, Macro F1: **0.72**
+- Model: `j-hartmann/emotion-english-distilroberta-base`
+- Weakest class: `confused` (0.12 recall — frequently misread as `neutral` or `excited`)
 
-- **Accuracy: 70.0%**
-- **Macro F1: 0.67**
-- **n = 40**
+### Fact Extraction (n=24)
 
-The main observed weaknesses are `browsing`, `wants_recommendation`, `ready_to_buy`, and `other`, with several classes being confused with semantically similar intents.
+- `preferred_size`: precision 1.00, recall 1.00
+- `preferred_color`: precision 1.00, recall 1.00
+- `budget_max`: precision 1.00, recall 1.00
+- `mentioned_products`: precision 1.00, recall 0.92
+- **Hallucinations: 0/24** — the extractor never invented a fact that wasn't stated in the message
 
-The result should be treated as a baseline rather than a production benchmark because the evaluation set is small and hand-crafted.
+### RAG Retrieval (n=22 positive, 3 negative, real 27-document catalog)
 
-### Emotion Classification
+- Recall@1: **90.91%**
+- Recall@3: **95.45%**
+- False positives on out-of-catalog queries: 0/3
+- Known miss: short factual entries (e.g. store address) fall below the similarity threshold. Ten phrasings were tested; the best (0.33) still fell short of the 0.35 cutoff. This reflects a limitation of the small embedding model on sparse factual text, not a retrieval logic defect.
 
-The emotion classifier is evaluated using:
+### Recommendation (n=9 positive, 5 negative)
 
-- **48** hand-labeled English examples
-- **6** application-level emotion classes
-- **8 examples per class**
-- `j-hartmann/emotion-english-distilroberta-base`
-- Accuracy, macro F1, precision, recall, and confusion matrix
+- Correct recommendation rate: **100%**
+- Unwanted recommendation rate: **20%** (1/5) — a query for "jackets" (not in the catalog) recommended a hoodie due to semantic similarity
+- Safety check passed: a complaint referencing a real product correctly produced **no** recommendation
 
-Latest measured baseline:
+### Evaluation-Driven Fixes
 
-- **Accuracy: 75.0%**
-- **Macro F1: 0.72**
-- **n = 48**
-
-The strongest class in the current evaluation is `angry`, while the main weakness is `confused`, which achieved only **0.12 recall**. Confused examples were frequently classified as `neutral` or `excited`.
+Running these evaluations surfaced and fixed four real defects before they reached production: a missing retry/failover path in fact extraction, an unhandled crash on malformed API responses (present in two files), a prompt-injection gap caused by a duplicated unguarded message, and a schema regression (a silently dropped field) that broke recommendation output.
 
 ### Evaluation Scope
 
-Current quantitative evaluation covers only emotion and intent classification.
-
-The following areas have not yet received formal quantitative evaluation:
-
-- **RAG retrieval** — recall@k and relevance judgments
-- **Recommendation** — precision@k
-- **Fact extraction** — field-level precision and recall
-- **Response generation** — groundedness and human quality review
-- **API performance** — p50 / p95 latency
-- **Reliability** — error rate and fallback-path trigger rate
-- **Cost** — LLM cost per conversation
-
-All performance numbers reported in this README are tied to a defined evaluation dataset and sample size. Future numbers should follow the same standard.
+Not yet formally evaluated: response-generation quality (groundedness, human review), API latency (p50/p95), reliability under load, and cost per conversation. All numbers in this README are tied to a stated dataset and sample size; future numbers will follow the same standard.
 
 ---
 
@@ -297,7 +283,10 @@ StoreFlowAI/
 │   ├── data/                          # labeled evaluation datasets
 │   ├── results/                       # timestamped evaluation results
 │   ├── evaluate_intent.py
-│   └── evaluate_emotion.py
+│   ├── evaluate_emotion.py
+│   ├── evaluate_fact_extraction.py
+│   ├── evaluate_rag.py
+│   └── evaluate_recommendation.py
 ├── tests/                             # pytest unit tests
 ├── Dockerfile
 ├── docker-compose.yml
@@ -310,20 +299,20 @@ StoreFlowAI/
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| API | FastAPI, Uvicorn |
-| Data validation / configuration | Pydantic, pydantic-settings |
-| Emotion detection | `j-hartmann/emotion-english-distilroberta-base` |
-| Intent detection | `facebook/bart-large-mnli` zero-shot classification |
-| RAG embeddings | Sentence-Transformers |
-| Response generation | OpenRouter, OpenAI-compatible API |
-| Fact extraction | OpenRouter |
-| Retry logic | Tenacity |
-| Conversation memory | MongoDB |
-| Testing | Pytest |
-| Evaluation | scikit-learn |
-| Containerization | Docker, Docker Compose |
+| Layer                           | Technology                                          |
+| ------------------------------- | --------------------------------------------------- |
+| API                             | FastAPI, Uvicorn                                    |
+| Data validation / configuration | Pydantic, pydantic-settings                         |
+| Emotion detection               | `j-hartmann/emotion-english-distilroberta-base`     |
+| Intent detection                | `facebook/bart-large-mnli` zero-shot classification |
+| RAG embeddings                  | Sentence-Transformers                               |
+| Response generation             | OpenRouter, OpenAI-compatible API                   |
+| Fact extraction                 | OpenRouter                                          |
+| Retry logic                     | Tenacity                                            |
+| Conversation memory             | MongoDB                                             |
+| Testing                         | Pytest                                              |
+| Evaluation                      | scikit-learn                                        |
+| Containerization                | Docker, Docker Compose                              |
 
 ---
 
@@ -566,14 +555,14 @@ RAG retrieval quality and response-generation quality are still primarily verifi
 - End-to-end Docker verification
 - Initial quantitative evaluation for intent classification
 - Initial quantitative evaluation for emotion classification
+- RAG retrieval evaluation
+- Recommendation evaluation
 
 ### Planned
 
 - Expand evaluation with real labeled customer conversations
 - Arabic-specific intent and emotion evaluation
 - Improve intent classification using better label definitions and/or supervised training once sufficient labeled data exists
-- Formal RAG retrieval evaluation
-- Recommendation evaluation
 - Fact-extraction evaluation
 - Response-quality evaluation
 - API latency and reliability benchmarks
@@ -588,8 +577,8 @@ RAG retrieval quality and response-generation quality are still primarily verifi
 
 Proprietary — all rights reserved.
 
-
 ## 👨‍💻 Author
+
 Basem Morad
 AI/ML Engineer | Computer Vision Specialist
 B.Sc. Mechatronics Engineering

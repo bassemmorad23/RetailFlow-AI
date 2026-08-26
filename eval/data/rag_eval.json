@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "description": "RAG retrieval evaluation set, built directly from the real indexed catalog (27 documents: 5 products, 8 policies, 8 FAQ, 6 store-info entries), dumped via eval/dump_index.py.",
+    "scoring_note": "expected_sources is a LIST because some topics are covered by more than one real document (e.g. policy_shipping and faq_002 both answer shipping-time questions). Retrieving ANY document in the list counts as correct.",
+    "negative_examples": "Queries with expected_sources = [] ask about things not in the catalog at all (shoes, kids clothing, discount codes). These test whether retrieval ever confidently returns an irrelevant document rather than nothing."
+  },
+  "examples": [
+    { "text": "do you have a red dress?", "expected_sources": ["prod_001"] },
+    { "text": "I want something floral for summer", "expected_sources": ["prod_001"] },
+    { "text": "show me black hoodies", "expected_sources": ["prod_002"] },
+    { "text": "I'm looking for slim fit jeans", "expected_sources": ["prod_003"] },
+    { "text": "do you sell basic white t-shirts?", "expected_sources": ["prod_004"] },
+    { "text": "any cargo pants available?", "expected_sources": ["prod_005"] },
+
+    { "text": "how long does shipping take?", "expected_sources": ["policy_shipping", "faq_002"] },
+    { "text": "can I return my order?", "expected_sources": ["policy_return", "faq_004"] },
+    { "text": "can I exchange for a different size?", "expected_sources": ["policy_exchange", "faq_005"] },
+    { "text": "what payment methods do you accept?", "expected_sources": ["policy_payment", "faq_003"] },
+    { "text": "do you have a size guide?", "expected_sources": ["policy_size", "faq_007"] },
+    { "text": "how do refunds work?", "expected_sources": ["policy_refund"] },
+    { "text": "can I cancel my order after placing it?", "expected_sources": ["policy_cancellation"] },
+    { "text": "what are your customer support hours?", "expected_sources": ["policy_support"] },
+    { "text": "do you ship outside Egypt?", "expected_sources": ["faq_001", "store_shipping"] },
+    { "text": "how can I track my order?", "expected_sources": ["faq_008"] },
+    { "text": "how can I contact you?", "expected_sources": ["faq_006", "store_contact"] },
+
+    { "text": "what's your instagram?", "expected_sources": ["store_contact"] },
+    { "text": "what's the name of your store?", "expected_sources": ["store_store_name"] },
+    { "text": "tell me about your store", "expected_sources": ["store_description"] },
+    { "text": "what time do you open?", "expected_sources": ["store_business_hours"] },
+    { "text": "where are you located?", "expected_sources": ["store_address"] },
+
+    { "text": "do you sell shoes?", "expected_sources": [] },
+    { "text": "do you have a kids collection?", "expected_sources": [] },
+    { "text": "can I get a discount code?", "expected_sources": [] }
+  ]
+}

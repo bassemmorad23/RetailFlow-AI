@@ -143,6 +143,7 @@ class RetrievedChunk(BaseModel):
     source: str
     score: float
     name: str | None = None
+    price: float | None = None
     
     
     
