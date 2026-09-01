@@ -1,0 +1,34 @@
+{
+  "store_name": "PageTurner Books",
+  "description": "An independent bookstore in Cairo specializing in fiction, technical, and cookbooks.",
+
+  "contact": {
+    "phone": "+20 111 222 3333",
+    "email": "hello@pageturner.example",
+    "instagram": "@pageturnercairo",
+    "facebook": "PageTurner Books"
+  },
+
+  "business_hours": {
+    "monday": "9:00 AM - 9:00 PM",
+    "tuesday": "9:00 AM - 9:00 PM",
+    "wednesday": "9:00 AM - 9:00 PM",
+    "thursday": "9:00 AM - 9:00 PM",
+    "friday": "2:00 PM - 9:00 PM",
+    "saturday": "9:00 AM - 9:00 PM",
+    "sunday": "Closed"
+  },
+
+  "shipping": {
+    "countries": ["Egypt"],
+    "estimated_delivery": "1-3 business days"
+  },
+
+  "payment_methods": [
+    "Cash on Delivery",
+    "Visa",
+    "MasterCard"
+  ],
+
+  "address": "PageTurner Books is located in Zamalek, Cairo, Egypt."
+}

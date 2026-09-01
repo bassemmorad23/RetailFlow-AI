@@ -24,6 +24,7 @@ def test_valid_message_is_stripped():
         customer_id="u1",
         text="  hello there  ",
         channel="web",
+        store_id="store_001"
     )
     assert msg.text == "hello there"
 
@@ -35,6 +36,7 @@ def test_empty_text_is_rejected():
             customer_id="u1",
             text="   ",
             channel="web",
+            store_id="store_001"
         )
 
 
@@ -44,6 +46,7 @@ def test_overlong_text_is_truncated():
         customer_id="u1",
         text="x" * (MAX_MESSAGE_LENGTH + 500),
         channel="web",
+        store_id="store_001"
     )
     assert len(msg.text) == MAX_MESSAGE_LENGTH
 
@@ -54,6 +57,7 @@ def test_control_characters_are_stripped():
         customer_id="u1",
         text="hi\x00\x07 there",
         channel="web",
+        store_id="store_001"
     )
     assert msg.text == "hi there"
 
@@ -64,6 +68,7 @@ def test_newlines_and_tabs_are_preserved():
         customer_id="u1",
         text="line1\nline2\ttabbed",
         channel="web",
+        store_id="store_001"
     )
     assert "\n" in msg.text
     assert "\t" in msg.text
@@ -78,6 +83,7 @@ def test_blank_identifier_is_rejected(field):
         "customer_id": "u1",
         "text": "hello",
         "channel": "web",
+        "store_id": "store_001"
     }
     kwargs[field] = "   "
     with pytest.raises(ValidationError):

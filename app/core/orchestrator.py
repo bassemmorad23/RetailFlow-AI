@@ -75,7 +75,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
 
     # Step 3 — Memory
     try:
-        memory = get_memory(message.conversation_id)
+        memory = get_memory(message.store_id, message.conversation_id)
     except Exception:
         logger.warning("Memory retrieval failed, using empty state.", exc_info=True)
         memory = MemoryState(
@@ -86,7 +86,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
 
     # Step 4 — RAG retrieval (protected at the orchestrator level)
     try:
-        retrieved_context = retrieve_context(message.text)
+        retrieved_context = retrieve_context(message.store_id, message.text)
     except Exception:
         logger.warning(
         "RAG retrieval failed, using empty context.",exc_info=True)
@@ -125,8 +125,8 @@ def handle_message(message: CustomerMessage) -> AgentReply:
 
     # Step 7 — Memory update (non-critical)
     try:
-        add_turn(message.conversation_id, "customer", message.text)
-        add_turn(message.conversation_id, "agent", reply_text)
+        add_turn(message.store_id, message.conversation_id, "customer", message.text)
+        add_turn(message.store_id, message.conversation_id, "agent", reply_text)
     except Exception:
         logger.warning("Memory update failed, turn not persisted.", exc_info=True)
 
@@ -137,7 +137,8 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         if new_facts:
             # Only keys actually found are passed — existing facts not
             # mentioned in this message are left untouched.
-            update_known_facts(message.conversation_id, **new_facts)
+            update_known_facts(message.store_id, message.conversation_id, **new_facts)
+            
             logger.info("Extracted facts: %s", new_facts)
     except Exception:
         logger.warning("Fact extraction failed.", exc_info=True)

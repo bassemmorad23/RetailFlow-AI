@@ -1,11 +1,33 @@
+"""
+Runtime semantic search against Qdrant Cloud (multi-tenant).
+
+WHY THIS EXISTS:
+Each store's data lives in its own Qdrant collection, named after the
+store_id. This module takes a store_id + query, computes the query
+embedding locally with the same model used at build time, searches ONLY
+that store's collection, and returns matches above the similarity
+threshold. Cross-store leaks are impossible by design — a Store A query
+never sees Store B's collection.
+
+KEPT FROM THE OLD RETRIEVER:
+  - MIN_SIMILARITY_SCORE = 0.35 (validated in the RAG evaluation)
+  - RetrievedChunk shape unchanged (content, source, score, name, price)
+  - Fail-graceful: any error returns [] instead of raising
+  - The embedding model is loaded once and cached (lru_cache)
+
+CHANGED:
+  - No more local pickle file; corpus lives in Qdrant Cloud
+  - Signature now requires store_id as the first argument
+"""
+
 import logging
-import pickle
 from functools import lru_cache
-from pathlib import Path
 
 import torch
-from sentence_transformers import SentenceTransformer, util
+from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
 
+from app.config import settings
 from app.schemas.models import RetrievedChunk
 
 
@@ -15,119 +37,79 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 DEFAULT_TOP_K = 3
 MIN_SIMILARITY_SCORE = 0.35
-
-EMBEDDINGS_PATH = (
-    Path(__file__).parent.parent.parent
-    / "data"
-    / "embeddings"
-    / "store_embeddings.pkl"
-)
+_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
 @lru_cache(maxsize=1)
-def _load_corpus() -> dict:
-    """
-    Load the precomputed embedding corpus from disk.
-    """
-
-    if not EMBEDDINGS_PATH.exists():
-        raise FileNotFoundError(
-            f"Embedding file not found: {EMBEDDINGS_PATH}"
-        )
-
-    with open(EMBEDDINGS_PATH, "rb") as f:
-        return pickle.load(f)
+def _load_model() -> SentenceTransformer:
+    """Load the embedding model once per process."""
+    logger.info("Loading embedding model: %s", _EMBEDDING_MODEL)
+    return SentenceTransformer(_EMBEDDING_MODEL, device=DEVICE)
 
 
 @lru_cache(maxsize=1)
-def _load_model() :
-    """
-    Load the SentenceTransformer model once.
-    """
-
-    corpus = _load_corpus()
-    
-    
-
-    logger.info("Loading embedding model: %s", corpus["model_name"])
-
-    return SentenceTransformer(
-        corpus["model_name"],
-        device=DEVICE,
-    )
+def _qdrant() -> QdrantClient:
+    """One Qdrant client, reused for every query."""
+    return QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY)
 
 
 def retrieve_context(
+    store_id: str,
     query: str,
-    top_k: int = DEFAULT_TOP_K,):
-
+    top_k: int = DEFAULT_TOP_K,
+) -> list[RetrievedChunk]:
     """
-    Retrieve the most relevant documents using cosine similarity.
+    Search the specified store's Qdrant collection for the top-k
+    documents matching the query, filtered by similarity threshold.
     """
-
     if query is None:
         return []
 
     query = query.strip()
-
     if not query:
         return []
 
-    try:
-        corpus = _load_corpus()
-        model = _load_model()
+    if not store_id:
+        logger.warning("retrieve_context called without a store_id")
+        return []
 
-        top_k = max(1, top_k)
-        top_k = min(top_k, len(corpus["docs"]))
+    try:
+        model = _load_model()
+        client = _qdrant()
 
         query_embedding = model.encode(
             query,
-            convert_to_tensor=True,
             normalize_embeddings=True,
-        )
-        
-        
-        print(query_embedding.device)
-        
+        ).tolist()
 
-        similarity_scores = util.cos_sim(
-            query_embedding,
-            corpus["embeddings"].to(DEVICE),
-        )[0]
+        top_k = max(1, top_k)
 
-        top_results = similarity_scores.topk(k=top_k)
+        search_results = client.query_points(
+            collection_name=store_id,
+            query=query_embedding,
+            limit=top_k,
+        ).points
 
-        retrieved_chunks = []
-
-        for score, idx in zip(
-            top_results.values,
-            top_results.indices,
-        ):
-
-            score = float(score)
-
+        retrieved_chunks: list[RetrievedChunk] = []
+        for hit in search_results:
+            score = float(hit.score)
             if score < MIN_SIMILARITY_SCORE:
                 continue
 
-            document = corpus["docs"][int(idx)]
-
+            payload = hit.payload or {}
             retrieved_chunks.append(
                 RetrievedChunk(
-                    content=document["content"],
-                    source=document["source"],
+                    content=payload.get("content", ""),
+                    source=payload.get("source", ""),
                     score=score,
-                    name=document.get("name"),
-                    price=document.get("price"),
+                    name=payload.get("name"),
+                    price=payload.get("price"),
                 )
             )
 
-        logger.info(
-            "Retrieved %d chunks for query.",
-            len(retrieved_chunks),
-        )
-
+        logger.info("Retrieved %d chunks for store_id=%s", len(retrieved_chunks), store_id)
         return retrieved_chunks
 
     except Exception:
-        logger.exception("Retriever failed.")
+        logger.exception("Retriever failed for store_id=%s", store_id)
         return []

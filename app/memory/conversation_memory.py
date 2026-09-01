@@ -27,20 +27,22 @@ def _get_collection():
 
 
 
-def get_memory(conversation_id: str):
-    
-    col=_get_collection()
-    doc=col.find_one({"conversation_id":conversation_id})
+def get_memory(store_id: str, conversation_id: str) -> MemoryState:
+    col = _get_collection()
+    doc = col.find_one({"store_id": store_id, "conversation_id": conversation_id})
     
     if doc is None:
-        fresh=MemoryState(conversation_id=conversation_id,history=[],known_facts=KnownFacts())
-        col.insert_one(fresh.model_dump())
+        fresh = MemoryState(
+            conversation_id=conversation_id,
+            history=[],
+            known_facts=KnownFacts(),
+        )
+        doc_to_save = fresh.model_dump()
+        doc_to_save["store_id"] = store_id
+        col.insert_one(doc_to_save)
         return fresh
-    
+
     return _doc_to_memory(doc)
-
-
-
 
 
 
@@ -64,15 +66,14 @@ def _doc_to_memory(doc:dict):
 
 
 
-def add_turn(conversation_id: str, role: str, text: str):
-    
-    memory=get_memory(conversation_id)
-    memory.history.append(ConversationTurn(role=role,text=text))
-    memory.history=memory.history[-_MAX_HISTORY_TURNS:]
-    
+def add_turn(store_id: str, conversation_id: str, role: str, text: str) -> MemoryState:
+    memory = get_memory(store_id, conversation_id)
+    memory.history.append(ConversationTurn(role=role, text=text))
+    memory.history = memory.history[-_MAX_HISTORY_TURNS:]
+
     col = _get_collection()
     col.update_one(
-        {"conversation_id": conversation_id},
+        {"store_id": store_id, "conversation_id": conversation_id},
         {"$set": {"history": [t.model_dump() for t in memory.history]}},
     )
     return memory
@@ -80,24 +81,19 @@ def add_turn(conversation_id: str, role: str, text: str):
 
 
 
-def update_known_facts(conversation_id: str, **facts) -> MemoryState:
-    """
-    Update one or more known facts for a conversation without touching
-    other fields. Only explicitly passed kwargs are overwritten.
-    """
-    memory = get_memory(conversation_id)
+
+
+def update_known_facts(store_id: str, conversation_id: str, **facts) -> MemoryState:
+    memory = get_memory(store_id, conversation_id)
     updated_facts = memory.known_facts.model_copy(update=facts)
     memory.known_facts = updated_facts
 
     col = _get_collection()
     col.update_one(
-        {"conversation_id": conversation_id},
+        {"store_id": store_id, "conversation_id": conversation_id},
         {"$set": {"known_facts": updated_facts.model_dump()}},
     )
-    return memory
-
-
-    
+    return memory 
   
     
 

@@ -28,8 +28,8 @@ def _memory(size=None, color=None):
 
 def _chunks():
     return [
-        RetrievedChunk(source="product_red_dress", content="Red dress", score=0.66),
-        RetrievedChunk(source="product_denim_jacket", content="Denim jacket", score=0.21),
+        RetrievedChunk(source="prod_red_dress", content="Red dress", score=0.66),
+        RetrievedChunk(source="prod_denim_jacket", content="Denim jacket", score=0.21),
         RetrievedChunk(source="faq_returns", content="Return policy", score=0.80),
     ]
 
@@ -43,7 +43,7 @@ def test_recommendation_intent_produces_results():
         retrieved_context=_chunks(),
     )
     assert len(recs) == 1
-    assert recs[0].product_id == "product_red_dress"
+    assert recs[0].product_id == "prod_red_dress"
 
 
 def test_complaint_intent_returns_empty():
@@ -58,7 +58,7 @@ def test_complaint_intent_returns_empty():
 # ── score threshold ─────────────────────────────────────────────────────────
 
 def test_low_score_chunks_filtered_out():
-    low = [RetrievedChunk(source="product_red_dress", content="Red dress", score=0.10)]
+    low = [RetrievedChunk(source="prod_red_dress", content="Red dress", score=0.10)]
     recs = recommend_products(
         intent=IntentResult(label=IntentLabel.WANTS_RECOMMENDATION, confidence=0.8),
         memory=_memory(),

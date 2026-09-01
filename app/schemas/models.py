@@ -17,6 +17,7 @@ MAX_MESSAGE_LENGTH = 2000
 class CustomerMessage(BaseModel):
     conversation_id :str
     customer_id : str
+    store_id: str
     text: str
     channel : str
     

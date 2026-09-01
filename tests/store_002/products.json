@@ -1,0 +1,38 @@
+[
+  {
+    "id": "book_001",
+    "title": "The Silent Library",
+    "description": "A gripping mystery novel set in an abandoned university library.",
+    "category": "Fiction",
+    "brand": "Random House",
+    "color": "N/A",
+    "sizes": [],
+    "price": 250,
+    "currency": "EGP",
+    "stock": 20
+  },
+  {
+    "id": "book_002",
+    "title": "Modern Python Programming",
+    "description": "A comprehensive guide to Python 3.12 with real-world projects.",
+    "category": "Programming",
+    "brand": "O'Reilly",
+    "color": "N/A",
+    "sizes": [],
+    "price": 480,
+    "currency": "EGP",
+    "stock": 15
+  },
+  {
+    "id": "book_003",
+    "title": "Cooking with Fire",
+    "description": "Traditional grilling and open-flame recipes from around the world.",
+    "category": "Cookbooks",
+    "brand": "Penguin",
+    "color": "N/A",
+    "sizes": [],
+    "price": 320,
+    "currency": "EGP",
+    "stock": 8
+  }
+]
