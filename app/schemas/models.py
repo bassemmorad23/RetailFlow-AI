@@ -23,7 +23,7 @@ class CustomerMessage(BaseModel):
     
     
     
-    @field_validator("conversation_id", "customer_id", "channel")
+    @field_validator("conversation_id", "customer_id", "store_id", "channel")
     @classmethod
     def _reject_blank_identifiers(cls, value: str) -> str:
         """

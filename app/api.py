@@ -1,21 +1,3 @@
-import logging 
-from fastapi import FastAPI, Request , HTTPException 
-
-
-from app.core.orchestrator import handle_message
-from app.logging_config import setup_logging
-from app.schemas.models import CustomerMessage, AgentReply
-
-
-
-
-
-app=FastAPI(
-    title="StoreFlow AI",
-    description="AI sales agent for clothing stores.",
-    version="0.1.0",
-
-)
 """
 FastAPI application — HTTP entrypoint for the agent.
 
@@ -38,24 +20,40 @@ CustomerMessage and AgentReply are already Pydantic models. FastAPI uses
 Pydantic natively for request and response bodies, so they plug straight
 in — request validation (including all the input-validation rules we added)
 happens automatically, and responses are serialized automatically.
+
+CORS:
+The widget will be loaded from many different store websites, each on
+its own domain. Browsers block cross-origin requests unless the API
+explicitly allows them. `allow_origins=["*"]` is fine for development;
+tighten this to the real store domains before onboarding real customers.
 """
 
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.orchestrator import handle_message
-from app import logging_config
+from app.logging_config import setup_logging
 from app.schemas.models import AgentReply, CustomerMessage
+
 
 # Configure logging once, at import time, before any request is served.
 setup_logging()
 logger = logging.getLogger(__name__)
 
+
 app = FastAPI(
     title="StoreFlow AI",
     description="AI sales agent for clothing stores.",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -90,4 +88,3 @@ def chat(message: CustomerMessage) -> AgentReply:
         message.channel,
     )
     return handle_message(message)
-
