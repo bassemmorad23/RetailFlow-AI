@@ -71,7 +71,9 @@ Rules:
 _client = OpenAI(
     base_url=_OPENROUTER_BASE_URL,
     api_key=settings.OPENROUTER_API_KEY,
+    timeout=30.0,
 )
+
 
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 

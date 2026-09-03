@@ -30,7 +30,7 @@ tighten this to the real store domains before onboarding real customers.
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI , Request , Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.orchestrator import handle_message
@@ -38,9 +38,18 @@ from app.logging_config import setup_logging
 from app.schemas.models import AgentReply, CustomerMessage
 
 
+
+from app.rate_limiter import rate_limit
+
+
+
+
 # Configure logging once, at import time, before any request is served.
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+
 
 
 app = FastAPI(
@@ -48,6 +57,12 @@ app = FastAPI(
     description="AI sales agent for clothing stores.",
     version="0.1.0",
 )
+
+
+
+
+
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,11 +84,12 @@ def health() -> dict:
 
 
 @app.post("/chat", response_model=AgentReply)
-def chat(message: CustomerMessage) -> AgentReply:
+
+def chat(request: Request,message: CustomerMessage, _rate_limit: None = Depends(rate_limit)) -> AgentReply:
     """
     Main endpoint: receive a customer message, return the agent's reply.
 
-    FastAPI automatically:
+    FastAPI automatically:  
       - parses the JSON body into a CustomerMessage (running all our
         input-validation rules; invalid input returns 422 without ever
         reaching the pipeline)
@@ -82,6 +98,9 @@ def chat(message: CustomerMessage) -> AgentReply:
     The orchestrator is called exactly as the CLI calls it — this endpoint
     adds no business logic of its own.
     """
+    
+    
+    
     logger.info(
         "Received message on conversation %s (channel=%s)",
         message.conversation_id,

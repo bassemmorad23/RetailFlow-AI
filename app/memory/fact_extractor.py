@@ -60,7 +60,9 @@ _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 _client = OpenAI(
     base_url=_OPENROUTER_BASE_URL,
     api_key=settings.OPENROUTER_API_KEY,
+    timeout=30.0,
 )
+
 
 _EXTRACTION_PROMPT = """You extract structured shopping preferences from a customer message.
 
