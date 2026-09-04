@@ -1,151 +1,222 @@
 """
-Orchestrator — production-hardened version.
+Orchestrator: the SINGLE place that owns the pipeline shape.
 
-FAILURE STRATEGY:
-Each pipeline step is independently wrapped. A failure in emotion detection
-does not stop intent detection. A failure in RAG does not stop response
-generation. The customer always gets a reply — degraded if necessary, but
-never a raw crash or empty response.
+WHY THIS EXISTS:
+Every downstream module (emotion, intent, memory, RAG, recommendation,
+response) has one job. This file is the ONLY place that knows the order
+they run in, how their results connect, and how to recover when one of
+them fails. That means schemas can change, storage can be swapped
+(dict -> Mongo), models can be replaced, and none of that ever forces a
+change in more than one file at a time.
 
-Failure hierarchy:
-  - Steps 1-5 (emotion, intent, memory, rag, recommendations):
-      Catch exception, log warning, use sensible default, continue.
-  - Step 6 (response generation):
-      Catch exception, log error, return a polite fallback message.
-      This is the only customer-facing failure mode.
-  - Steps 7-9 (memory update, logging):
-      Catch exception, log warning, never block the return.
+WHY EVERY STEP HAS ITS OWN try/except INSTEAD OF ONE BIG ONE:
+A single try/except around the whole pipeline would mean any single
+failure short-circuits everything else and returns a generic error.
+Real pipelines aren't that fragile: if emotion detection fails, we can
+still recommend a product; if RAG fails, we can still generate a reply
+from history alone. Isolating failure per step preserves as much of the
+pipeline as possible on partial failure.
+
+WHY SAFE FALLBACK VALUES INSTEAD OF PROPAGATED EXCEPTIONS:
+Each step returns a valid-but-empty result on failure (e.g. Neutral
+emotion, empty retrieval list) so downstream code never has to guard
+against None. Downstream modules are simpler because they can trust the
+shape they receive.
+
+WHY WE UPDATE MEMORY LAST:
+add_turn and update_known_facts are the operations that MUTATE state.
+If they run early and something later fails, the conversation memory
+gets a message that never actually produced a reply — a phantom turn.
+Doing all writes at the end means memory only records what actually
+happened.
+
+WHY analytics_logger IS ALSO IN try/except:
+Analytics is best-effort. If disk is full or the JSONL file is locked,
+we do NOT want the CUSTOMER to see an error. Log the failure, keep
+serving the reply.
+
+STRUCTURED STEP TIMING:
+Every pipeline step is wrapped in _time_step(), which measures wall-clock
+duration and logs it with `pipeline_step` + `latency_ms` + `status`. This
+is what lets you later ask "which step is slow?" without instrumenting
+each one manually.
 """
 
-
 import logging
+import time
+from typing import Any, Callable
 
-from app.analytics.conversation_logger import log_turn
 from app.emotion.emotion_detector import detect_emotion
 from app.intent.intent_detector import detect_intent
+from app.memory.conversation_memory import get_memory, add_turn, update_known_facts
+from app.memory.fact_extractor import extract_facts
 from app.rag.retriever import retrieve_context
 from app.recommendation.product_recommender import recommend_products
 from app.response.response_generator import generate_response
-
-from app.memory.fact_extractor import extract_facts
-from app.memory.conversation_memory import add_turn, get_memory, update_known_facts
+from app.analytics.conversation_logger import log_turn
 
 from app.schemas.models import (
     AgentReply,
     CustomerMessage,
-    EmotionLabel,
     EmotionResult,
-    IntentLabel,
+    EmotionLabel,
     IntentResult,
+    IntentLabel,
     KnownFacts,
     MemoryState,
 )
 
 logger = logging.getLogger(__name__)
 
-_FALLBACK_REPLY = (
-    "I am sorry, I am having a little trouble right now. "
-    "Please try again in a moment."
+
+# --- Safe fallback values for each step --------------------------------------
+
+_FALLBACK_EMOTION = EmotionResult(
+    label=EmotionLabel.NEUTRAL,
+    confidence=0.0,
+    scores={},
+)
+
+_FALLBACK_INTENT = IntentResult(
+    label=IntentLabel.OTHER,
+    confidence=0.0,
 )
 
 
+def _fallback_memory(conversation_id: str) -> MemoryState:
+    """
+    Best-effort memory when Mongo is unreachable. Empty history and facts,
+    so the pipeline still returns a reply, just without personalization.
+    """
+    return MemoryState(
+        conversation_id=conversation_id,
+        history=[],
+        known_facts=KnownFacts(),
+    )
+
+
+# --- Timing helper -----------------------------------------------------------
+
+def _time_step(step_name: str, fn: Callable[[], Any], fallback: Any) -> Any:
+    """
+    Run a pipeline step, time it, log the outcome as one structured line.
+
+    On success: logs pipeline_step + latency_ms + status="ok"
+    On failure: logs pipeline_step + latency_ms + status="error"
+                + exc_info, then returns the provided fallback so the
+                pipeline can continue.
+
+    Keeps timing/logging boilerplate out of the pipeline body itself,
+    which stays readable as a top-to-bottom list of steps.
+    """
+    started = time.monotonic()
+    try:
+        result = fn()
+        latency_ms = int((time.monotonic() - started) * 1000)
+        logger.info(
+            "pipeline step complete",
+            extra={
+                "pipeline_step": step_name,
+                "latency_ms": latency_ms,
+                "status": "ok",
+            },
+        )
+        return result
+    except Exception:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        logger.exception(
+            "pipeline step failed",
+            extra={
+                "pipeline_step": step_name,
+                "latency_ms": latency_ms,
+                "status": "error",
+            },
+        )
+        return fallback
+
+
+# --- Main pipeline -----------------------------------------------------------
+
 def handle_message(message: CustomerMessage) -> AgentReply:
     """
-    Run a customer message through the full agent pipeline.
-    Every step is independently fault-tolerant.
+    Run the full pipeline for one incoming message.
     """
+    total_started = time.monotonic()
 
-    # Step 1 — Emotion
-    try:
-        emotion = detect_emotion(message.text)
-    except Exception:
-        logger.warning("Emotion detection failed, defaulting to NEUTRAL.", exc_info=True)
-        emotion = EmotionResult(
-            label=EmotionLabel.NEUTRAL,
-            confidence=0.0,
-            scores={},
-        )
+    emotion = _time_step(
+        "emotion_detection",
+        lambda: detect_emotion(message.text),
+        _FALLBACK_EMOTION,
+    )
 
-    # Step 2 — Intent
-    try:
-        intent = detect_intent(message.text)
-    except Exception:
-        logger.warning("Intent detection failed, defaulting to OTHER.", exc_info=True)
-        intent = IntentResult(label=IntentLabel.OTHER, confidence=0.0)
+    intent = _time_step(
+        "intent_detection",
+        lambda: detect_intent(message.text),
+        _FALLBACK_INTENT,
+    )
 
-    # Step 3 — Memory
-    try:
-        memory = get_memory(message.store_id, message.conversation_id)
-    except Exception:
-        logger.warning("Memory retrieval failed, using empty state.", exc_info=True)
-        memory = MemoryState(
-            conversation_id=message.conversation_id,
-            history=[],
-            known_facts=KnownFacts(),
-        )
+    memory = _time_step(
+        "memory_load",
+        lambda: get_memory(message.store_id, message.conversation_id),
+        _fallback_memory(message.conversation_id),
+    )
 
-    # Step 4 — RAG retrieval (protected at the orchestrator level)
-    try:
-        retrieved_context = retrieve_context(message.store_id, message.text)
-    except Exception:
-        logger.warning(
-        "RAG retrieval failed, using empty context.",exc_info=True)
-        
-        retrieved_context = []
-    
-    
-    
-    
-    
+    retrieved_context = _time_step(
+        "rag_retrieval",
+        lambda: retrieve_context(message.store_id, message.text),
+        [],
+    )
 
-    # Step 5 — Recommendations
-    try:
-        recommendations = recommend_products(
+    recommendations = _time_step(
+        "recommendation",
+        lambda: recommend_products(
             intent=intent,
             memory=memory,
             retrieved_context=retrieved_context,
-        )
-    except Exception:
-        logger.warning("Recommendation failed, returning empty list.", exc_info=True)
-        recommendations = []
+        ),
+        [],
+    )
 
-    # Step 6 — Response generation (critical, customer-facing)
-    try:
-        reply_text = generate_response(
+    reply_text = _time_step(
+        "response_generation",
+        lambda: generate_response(
             message=message,
             emotion=emotion,
             intent=intent,
             memory=memory,
             retrieved_context=retrieved_context,
             recommendations=recommendations,
+        ),
+        "Sorry, I could not process your message.",
+    )
+
+    # --- writes: happen last, so nothing is persisted for a failed request ---
+
+    _time_step(
+        "memory_add_turn_customer",
+        lambda: add_turn(message.store_id, message.conversation_id, "customer", message.text),
+        None,
+    )
+
+    _time_step(
+        "memory_add_turn_agent",
+        lambda: add_turn(message.store_id, message.conversation_id, "agent", reply_text),
+        None,
+    )
+
+    new_facts = _time_step(
+        "fact_extraction",
+        lambda: extract_facts(message.text),
+        {},
+    )
+
+    if new_facts:
+        _time_step(
+            "memory_update_facts",
+            lambda: update_known_facts(message.store_id, message.conversation_id, **new_facts),
+            None,
         )
-    except Exception:
-        logger.error("Response generation failed, using fallback reply.", exc_info=True)
-        reply_text = _FALLBACK_REPLY
 
-    # Step 7 — Memory update (non-critical)
-    try:
-        add_turn(message.store_id, message.conversation_id, "customer", message.text)
-        add_turn(message.store_id, message.conversation_id, "agent", reply_text)
-    except Exception:
-        logger.warning("Memory update failed, turn not persisted.", exc_info=True)
-
-    # Step 7b — Fact extraction (non-critical, runs AFTER the reply so the
-    # customer never waits on it. Facts land in time for the NEXT turn.)
-    try:
-        new_facts = extract_facts(message.text)
-        if new_facts:
-            # Only keys actually found are passed — existing facts not
-            # mentioned in this message are left untouched.
-            update_known_facts(message.store_id, message.conversation_id, **new_facts)
-            
-            logger.info("Extracted facts: %s", new_facts)
-    except Exception:
-        logger.warning("Fact extraction failed.", exc_info=True)
-        
-        
-
-    # Step 8 — Assemble reply
     reply = AgentReply(
         conversation_id=message.conversation_id,
         reply_text=reply_text,
@@ -155,11 +226,20 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         retrieved_context=retrieved_context,
     )
 
-    # Step 9 — Analytics (log_turn has its own try/except inside)
-    try:
-        log_turn(message, reply)
-    except Exception:
-        logger.warning(
-        "Conversation logging failed.",exc_info=True)
-        
+    _time_step(
+        "analytics_log",
+        lambda: log_turn(message, reply),
+        None,
+    )
+
+    total_latency_ms = int((time.monotonic() - total_started) * 1000)
+    logger.info(
+        "pipeline complete",
+        extra={
+            "pipeline_step": "TOTAL",
+            "latency_ms": total_latency_ms,
+            "status": "ok",
+        },
+    )
+
     return reply

@@ -1,50 +1,55 @@
 """
-Known-facts extraction module.
+Fact extraction from a single customer message.
 
-WHY LLM EXTRACTION AND NOT REGEX RULES:
-Customers write in Arabic and English, in unpredictable phrasing
-("مقاس ميديم", "I'm a medium", "M size pls", "budget around 2k"). A
-rule-based extractor would need a separate hand-written rule set per
-language and would still miss most natural phrasing. An LLM handles all
-of it with no per-language work. Cost is one extra model call per turn —
-acceptable at current volume, revisit if latency or rate limits bite.
+WHY THIS EXISTS:
+Alongside the visible reply, we quietly build up a small profile of what
+the customer said they want — their size, color preference, budget, and
+which products they've mentioned. Doing this with a compact prompt to a
+capable LLM handles both Arabic and English input without maintaining
+regex/keyword rules per language.
 
-WHY THIS IS A SEPARATE MODULE FROM conversation_memory.py:
-conversation_memory owns STORAGE (get/write/trim). This module owns
-UNDERSTANDING (what facts are in this text). Different responsibilities,
-different failure modes — a Mongo timeout and a model hallucination need
-different handling. Keeping them apart means swapping the extraction
-strategy later (to rules, or a fine-tuned model) touches only this file.
+WHY THIS RETURNS A DICT[str, ANY]:
+The extractor returns a raw dict rather than a KnownFacts object because
+the orchestrator layer decides how to MERGE the new facts with existing
+memory. Keeping merge policy out of this module keeps extraction pure —
+"look at the message, output what was stated." Nothing else.
 
-WHY IT NEVER RETURNS NULLS TO OVERWRITE EXISTING FACTS:
-If the model finds no size in this message, that means "not mentioned
-here" — NOT "the customer no longer has a size preference". Returning
-None for it would wipe a fact we already knew. So we return only the
-keys that were actually found, and the caller merges rather than replaces.
+WHY WE CHECK EACH FIELD BEFORE USING IT:
+The LLM may return partial JSON, extra keys, or the wrong type. We only
+accept known keys and validate types before returning them. Anything
+malformed silently becomes {} — never a crash, never corrupted memory.
 
-WHY THIS NOW HAS THE SAME RETRY + FAILOVER CHAIN AS response_generator.py:
-Originally this called only the FIRST model in the chain, once, with no
-retry. That meant a rate-limited primary model made fact extraction fail
-for that turn even though a backup model was available and working —
-exactly the gap response_generator.py's failover chain already solves
-for response generation. This module now uses the identical two-layer
-pattern: retry transient errors on the current model with backoff, then
-move to the next model in the chain if it's still failing.
+RESILIENCE:
+Same two-layer model as response_generator.py:
+  1. Per-model retries with backoff for transient errors
+  2. Chain-level failover if a whole model is unusable
 
-FAILURE MODE:
-Extraction is best-effort. If every model in the chain fails, returns
-malformed JSON, or times out, we return an empty dict and the conversation
-continues with whatever facts we already had. A failed extraction must
-never break a customer conversation.
+WHY A FAILURE HERE RETURNS {} INSTEAD OF RAISING:
+Fact extraction is a background enrichment step — a failure should not
+break the customer conversation. If we can't extract facts this turn,
+we return {} and keep going. Memory just doesn't grow this turn.
+
+STRUCTURED LOGGING NOTES:
+Successful extraction: one log line with model + latency_ms + fact count.
+Failed model call: one log line with failed_model + reason + latency,
+before moving to the next model.
 """
 
 import json
 import logging
+import re
+import time
+from typing import Any
 
-from openai import OpenAI
-from openai import APIStatusError, APITimeoutError, APIConnectionError
+from openai import (
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    APITimeoutError,
+    OpenAI,
+    RateLimitError,
+)
 from tenacity import (
-    before_sleep_log,
     retry,
     retry_if_exception,
     stop_after_attempt,
@@ -53,9 +58,18 @@ from tenacity import (
 
 from app.config import settings
 
+
 logger = logging.getLogger(__name__)
 
+
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+_ALLOWED_FIELDS = {
+    "preferred_size",
+    "preferred_color",
+    "budget_max",
+    "mentioned_products",
+}
 
 _client = OpenAI(
     base_url=_OPENROUTER_BASE_URL,
@@ -63,138 +77,168 @@ _client = OpenAI(
     timeout=30.0,
 )
 
+_SYSTEM_PROMPT = """You are an extraction assistant. Read the customer's message
+and extract only the facts they explicitly stated about their preferences.
 
-_EXTRACTION_PROMPT = """You extract structured shopping preferences from a customer message.
+Return a valid JSON object with any of these optional keys:
+- preferred_size: string (e.g., "M", "L", "XL")
+- preferred_color: string (lowercase, e.g., "red")
+- budget_max: number (in the store's currency)
+- mentioned_products: list of product-type strings the customer named
 
-Return ONLY a JSON object. No markdown, no code fences, no explanation.
-
-Include a key ONLY if the customer explicitly stated it in THIS message.
-Omit any key that was not mentioned. If nothing was stated, return {}.
-
-Possible keys:
-  "preferred_size"   - clothing size as a string, e.g. "M", "XL", "42"
-  "preferred_color"  - a single color in English, lowercase, e.g. "red"
-  "budget_max"       - maximum budget as a number only, no currency symbol
-  "mentioned_products" - array of product names/types the customer referred to
-
-Do NOT infer or guess. Do NOT include a key just because it seems likely.
-The message may be in Arabic or English; always return the JSON keys in English.
-
-Examples:
-Message: "عايز فستان أحمر مقاس ميديم"
-{"preferred_size": "M", "preferred_color": "red", "mentioned_products": ["dress"]}
-
-Message: "do you ship to Alexandria?"
-{}
-
-Message: "looking for jackets under 3000"
-{"budget_max": 3000, "mentioned_products": ["jacket"]}"""
-
-_ALLOWED_KEYS = {
-    "preferred_size",
-    "preferred_color",
-    "budget_max",
-    "mentioned_products",
-}
-
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
+Rules:
+- Only include a key if the message clearly states it.
+- Do NOT guess. Do NOT invent.
+- If nothing is stated, return exactly: {}
+- Output ONLY the JSON. No prose, no code fences.
+"""
 
 
-def _is_retryable(exc: Exception) -> bool:
-    """True only for transient errors worth retrying on the SAME model."""
+# ---------------------------------------------------------------------------
+# LOW-LEVEL: single-model call with retry
+# ---------------------------------------------------------------------------
+
+def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, (RateLimitError, APIConnectionError, APITimeoutError)):
+        return True
     if isinstance(exc, APIStatusError):
-        return exc.status_code in _RETRYABLE_STATUS_CODES
-    return isinstance(exc, (APITimeoutError, APIConnectionError))
+        return 500 <= exc.status_code < 600
+    if isinstance(exc, APIError):
+        return True
+    return False
+
+
+def _classify_failure(exc: BaseException) -> str:
+    if isinstance(exc, APITimeoutError):
+        return "timeout"
+    if isinstance(exc, RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, APIConnectionError):
+        return "connection_error"
+    if isinstance(exc, APIStatusError):
+        return f"http_{exc.status_code}"
+    if isinstance(exc, ValueError):
+        return "empty_response"
+    if isinstance(exc, APIError):
+        return "api_error"
+    return type(exc).__name__
 
 
 @retry(
-    retry=retry_if_exception(_is_retryable),
-    stop=stop_after_attempt(2),
-    wait=wait_exponential(multiplier=1, min=2, max=15),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(_is_retryable),
 )
 def _call_single_model(model: str, text: str) -> str:
-    """
-    One model, with per-model retry on transient errors. Raises if it
-    still fails — the caller moves to the next model in the chain.
-    """
+    """One extraction call to one model, with retry-on-transient-error."""
     response = _client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": _EXTRACTION_PROMPT},
+            {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": text},
         ],
-        max_tokens=200,
-        temperature=0.0,
+        temperature=0,
     )
-    
+
     if not response.choices:
         raise ValueError(f"Model {model} returned no choices in response.")
 
     return response.choices[0].message.content.strip()
 
 
-def extract_facts(text: str) -> dict:
-    """
-    Extract explicitly-stated shopping preferences from a customer message.
+# ---------------------------------------------------------------------------
+# PUBLIC
+# ---------------------------------------------------------------------------
 
-    Tries each model in settings.response_model_chain in order, same
-    failover pattern as response_generator.py. Returns {} if the text is
-    empty, or if EVERY model in the chain fails.
+def extract_facts(text: str) -> dict[str, Any]:
+    """
+    Extract stated facts from a single customer message. Walks the
+    configured model chain and stops at the first success.
     """
     if not text or not text.strip():
         return {}
 
     for model in settings.response_model_chain:
+        started = time.monotonic()
         try:
             raw = _call_single_model(model, text)
-            return _parse_facts(raw)
-        except Exception:
-            logger.warning("Fact extraction model failed, trying next: %s", model, exc_info=True)
+            latency_ms = int((time.monotonic() - started) * 1000)
+
+            parsed = _parse_facts(raw)
+            logger.info(
+                "Facts extracted",
+                extra={
+                    "model": model,
+                    "latency_ms": latency_ms,
+                    "fact_count": len(parsed),
+                },
+            )
+            return parsed
+
+        except Exception as exc:
+            latency_ms = int((time.monotonic() - started) * 1000)
+            logger.warning(
+                "Fact extraction model failed, trying next in chain",
+                extra={
+                    "failed_model": model,
+                    "failure_reason": _classify_failure(exc),
+                    "failure_detail": str(exc)[:200],
+                    "latency_ms": latency_ms,
+                },
+            )
             continue
 
-    logger.warning("Fact extraction: all models in the chain failed.")
+    logger.error(
+        "All models in chain failed for fact extraction; returning {}",
+        extra={"chain_length": len(settings.response_model_chain)},
+    )
     return {}
 
 
-def _parse_facts(raw: str) -> dict:
+# ---------------------------------------------------------------------------
+# PARSING HELPERS
+# ---------------------------------------------------------------------------
+
+def _parse_facts(raw: str) -> dict[str, Any]:
     """
-    Parse the model's response into a clean facts dict.
+    Turn the model's raw text into a safe dict. Handles common failure
+    modes (code fences, prose leading up to JSON, malformed output) by
+    silently returning {} rather than raising.
     """
-    cleaned = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    if not raw:
+        return {}
+
+    cleaned = raw.strip()
+    cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+    cleaned = re.sub(r"```$", "", cleaned).strip()
+
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match is None:
+        logger.debug("Fact extraction returned non-JSON; ignoring")
+        return {}
 
     try:
-        parsed = json.loads(cleaned)
+        parsed = json.loads(match.group(0))
     except json.JSONDecodeError:
-        logger.warning("Fact extraction returned non-JSON: %r", raw[:200])
+        logger.debug("Fact extraction returned malformed JSON; ignoring")
         return {}
 
     if not isinstance(parsed, dict):
-        logger.warning("Fact extraction returned non-object JSON: %r", raw[:200])
         return {}
 
-    facts = {}
-
+    result: dict[str, Any] = {}
     for key, value in parsed.items():
-        if key not in _ALLOWED_KEYS:
+        if key not in _ALLOWED_FIELDS:
             continue
-        if value is None:
-            continue
+        if key == "mentioned_products":
+            if isinstance(value, list) and all(isinstance(v, str) for v in value):
+                result[key] = value
+        elif key == "budget_max":
+            if isinstance(value, (int, float)):
+                result[key] = float(value)
+        elif key in {"preferred_size", "preferred_color"}:
+            if isinstance(value, str) and value.strip():
+                result[key] = value.strip()
 
-        if key == "budget_max":
-            try:
-                facts[key] = float(value)
-            except (TypeError, ValueError):
-                logger.warning("Bad budget_max value: %r", value)
-        elif key == "mentioned_products":
-            if isinstance(value, list):
-                items = [str(v).strip() for v in value if str(v).strip()]
-                if items:
-                    facts[key] = items
-        else:
-            text_value = str(value).strip()
-            if text_value:
-                facts[key] = text_value
-
-    return facts
+    return result

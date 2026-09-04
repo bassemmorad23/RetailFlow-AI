@@ -41,6 +41,9 @@ from app.schemas.models import AgentReply, CustomerMessage
 
 from app.rate_limiter import rate_limit
 
+import uuid
+from app.log_context import set_request_context, clear_request_context
+
 
 
 
@@ -72,6 +75,32 @@ app.add_middleware(
 )
 
 
+
+@app.middleware("http")
+async def add_request_context(request: Request, call_next):
+    """
+    For every HTTP request, generate a unique request_id and (if the
+    body is a chat message) capture store_id and conversation_id, so
+    every log line emitted while handling this request carries them
+    automatically. Cleared at the end so context doesn't leak to the
+    next request on the same worker.
+    """
+    request_id = str(uuid.uuid4())
+    set_request_context(request_id=request_id)
+
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        clear_request_context()
+
+
+
+
+
+
+
 @app.get("/health")
 def health() -> dict:
     """
@@ -101,9 +130,9 @@ def chat(request: Request,message: CustomerMessage, _rate_limit: None = Depends(
     
     
     
-    logger.info(
-        "Received message on conversation %s (channel=%s)",
-        message.conversation_id,
-        message.channel,
+    set_request_context(
+        store_id=message.store_id,
+        conversation_id=message.conversation_id,
     )
+    logger.info("Received message", extra={"channel": message.channel})
     return handle_message(message)
