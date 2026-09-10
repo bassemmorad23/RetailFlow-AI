@@ -12,9 +12,6 @@ services:
     volumes:
             - mongo_data:/data/db
 
-
-
-
   app:
     build:
       context: .
@@ -30,17 +27,6 @@ services:
     depends_on:
         - mongo
 
-
-
 volumes:
   mongo_data:
     driver: local
-  
-  
-
-
-
-
-
-          
-      

@@ -174,16 +174,16 @@ The split between local and external inference is deliberate: emotion detection,
 
 ## Engineering Trade-offs
 
-| Decision                                    | Why                                                                                          | Trade-off                                                                                 |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Multi-tenant with one Qdrant collection per store | Physical separation makes cross-store leaks impossible by design                       | Adds a collection-creation step when a new store onboards                                 |
-| MongoDB as source of truth for catalog data | Standard multi-tenant pattern (shared collections filtered by store_id); persists across restarts | Requires a manual embedding rebuild when a store's catalog changes (auto-sync deferred) |
-| Qdrant Cloud (hosted) rather than self-hosted | Removes operational burden of running a vector DB                                          | Adds an external dependency and a network hop per query                                   |
-| Local emotion/intent models                 | Avoids external latency and per-request cost for classification tasks                        | Lower accuracy ceiling than a larger hosted or fine-tuned model                           |
-| Zero-shot intent classification (BART-MNLI) | No labeled conversation data exists yet; allows intent detection without a training pipeline | 70.0% accuracy and 0.67 macro F1 on n=40 (English-only starter set)                     |
-| LLM-based fact extraction                   | Handles Arabic and English phrasing without separate rule sets                               | Adds one model call per turn and may occasionally fail to produce structured output       |
-| Multi-model failover chain                  | Keeps conversations working when individual free-tier models rate-limit                      | Free-tier models can still rate-limit under sustained concurrent traffic                  |
-| Central orchestrator                        | Keeps operation order, failure-handling policy, and store scoping in one place               | Requires stable typed interfaces between modules                                          |
+| Decision                                          | Why                                                                                               | Trade-off                                                                               |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Multi-tenant with one Qdrant collection per store | Physical separation makes cross-store leaks impossible by design                                  | Adds a collection-creation step when a new store onboards                               |
+| MongoDB as source of truth for catalog data       | Standard multi-tenant pattern (shared collections filtered by store_id); persists across restarts | Requires a manual embedding rebuild when a store's catalog changes (auto-sync deferred) |
+| Qdrant Cloud (hosted) rather than self-hosted     | Removes operational burden of running a vector DB                                                 | Adds an external dependency and a network hop per query                                 |
+| Local emotion/intent models                       | Avoids external latency and per-request cost for classification tasks                             | Lower accuracy ceiling than a larger hosted or fine-tuned model                         |
+| Zero-shot intent classification (BART-MNLI)       | No labeled conversation data exists yet; allows intent detection without a training pipeline      | 70.0% accuracy and 0.67 macro F1 on n=40 (English-only starter set)                     |
+| LLM-based fact extraction                         | Handles Arabic and English phrasing without separate rule sets                                    | Adds one model call per turn and may occasionally fail to produce structured output     |
+| Multi-model failover chain                        | Keeps conversations working when individual free-tier models rate-limit                           | Free-tier models can still rate-limit under sustained concurrent traffic                |
+| Central orchestrator                              | Keeps operation order, failure-handling policy, and store scoping in one place                    | Requires stable typed interfaces between modules                                        |
 
 ---
 
@@ -230,10 +230,10 @@ All datasets are small, hand-crafted starter sets, not real customer traffic. Th
 
 Verified with two live stores sharing one deployment (store_001: clothing, store_002: bookstore):
 
-| Query | store_001 (clothing) | store_002 (bookstore) |
-| --- | --- | --- |
-| "do you have a red dress?" | Finds `prod_001` (0.552) | Returns nothing |
-| "do you have a book about python?" | Returns nothing | Finds `book_002` (0.661) |
+| Query                              | store_001 (clothing)     | store_002 (bookstore)    |
+| ---------------------------------- | ------------------------ | ------------------------ |
+| "do you have a red dress?"         | Finds `prod_001` (0.552) | Returns nothing          |
+| "do you have a book about python?" | Returns nothing          | Finds `book_002` (0.661) |
 
 Verified across memory (conversations), RAG (Qdrant collections), and recommendations. Zero cross-store leaks in either direction.
 

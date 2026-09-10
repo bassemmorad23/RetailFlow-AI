@@ -53,11 +53,20 @@ Those keys become top-level keys in the resulting JSON. Standard fields
 """
 
 import logging
+from xml.sax import handler
 
 from pythonjsonlogger.json import JsonFormatter
 
 from app.config import settings
 from app.log_context import get_request_context
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+
+
+_LOG_FILE_PATH = Path("data/logs/app.jsonl")
+_LOG_FILE_MAX_BYTES = 10 * 1024 * 1024   # 10 MB per file
+_LOG_FILE_BACKUP_COUNT = 5                # keeps 5 rotated backups → 50MB max total
 
 
 # Third-party loggers that are too verbose at INFO/DEBUG.
@@ -104,17 +113,30 @@ def setup_logging() -> None:
             "name": "logger",
         },
     )
+    
+    # Terminal handler — for live watching during dev/debug
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    handler.addFilter(_ContextFilter())
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(_ContextFilter())
+
+    # File handler — rotating JSONL for later analysis and cross-restart persistence
+    _LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        _LOG_FILE_PATH,
+        maxBytes=_LOG_FILE_MAX_BYTES,
+        backupCount=_LOG_FILE_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    
+    file_handler.setFormatter(formatter)
+    file_handler.addFilter(_ContextFilter())
 
     root = logging.getLogger()
     root.setLevel(level)
 
-    # Replace any pre-existing handlers (e.g. from uvicorn's default setup)
-    # so we don't get duplicate lines in one plain-text and one JSON.
-    root.handlers = [handler]
+    # Both handlers active — every log line goes to terminal AND file
+    root.handlers = [stream_handler, file_handler]
 
     # Quiet the noisy third-party libraries.
     for name in _NOISY_LOGGERS:

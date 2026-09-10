@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str
     QDRANT_URL: str
     QDRANT_API_KEY: str
+    SENTRY_DSN: str = ""
     
     response_model_chain: list[str] = [
     "nvidia/nemotron-3-ultra-550b-a55b:free",

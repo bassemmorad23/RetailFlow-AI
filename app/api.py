@@ -36,36 +36,37 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.orchestrator import handle_message
 from app.logging_config import setup_logging
 from app.schemas.models import AgentReply, CustomerMessage
-
-
-
 from app.rate_limiter import rate_limit
-
 import uuid
 from app.log_context import set_request_context, clear_request_context
+import sentry_sdk
+from app.config import settings
+import time
+from fastapi.responses import JSONResponse
+from app.metrics import record_request, get_metrics
+from app.log_context import set_request_context, clear_request_context, get_request_context
 
 
+
+
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.APP_ENV,
+        send_default_pii=False,
+        traces_sample_rate=0.1 if settings.APP_ENV == "production" else 1.0,
+    )
 
 
 # Configure logging once, at import time, before any request is served.
 setup_logging()
 logger = logging.getLogger(__name__)
 
-
-
-
-
 app = FastAPI(
     title="StoreFlow AI",
     description="AI sales agent for clothing stores.",
     version="0.1.0",
 )
-
-
-
-
-
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,15 +76,17 @@ app.add_middleware(
 )
 
 
-
 @app.middleware("http")
 async def add_request_context(request: Request, call_next):
     """
-    For every HTTP request, generate a unique request_id and (if the
-    body is a chat message) capture store_id and conversation_id, so
-    every log line emitted while handling this request carries them
-    automatically. Cleared at the end so context doesn't leak to the
-    next request on the same worker.
+    Per-request setup:
+      - Assign a unique request_id (visible in logs and returned via header)
+      - Clear context on the way out so nothing leaks to the next request
+
+    Note: Metrics are recorded inside the /chat endpoint itself, not here,
+    because store_id is only known once the request body is parsed by
+    FastAPI — and contextvars set inside sync endpoints don't propagate
+    back to this async middleware.
     """
     request_id = str(uuid.uuid4())
     set_request_context(request_id=request_id)
@@ -97,10 +100,6 @@ async def add_request_context(request: Request, call_next):
 
 
 
-
-
-
-
 @app.get("/health")
 def health() -> dict:
     """
@@ -111,28 +110,34 @@ def health() -> dict:
     """
     return {"status": "ok"}
 
+@app.get("/metrics")
+def metrics() -> dict:
+    """
+    Basic operational metrics: request count, latency, error rate.
+    Public (no auth) — same pattern as Prometheus. Contains only counts
+    and latencies, never customer data.
+    """
+    return get_metrics()
+
 
 @app.post("/chat", response_model=AgentReply)
-
-def chat(request: Request,message: CustomerMessage, _rate_limit: None = Depends(rate_limit)) -> AgentReply:
+def chat(request: Request, message: CustomerMessage, _rate_limit: None = Depends(rate_limit)) -> AgentReply:
     """
     Main endpoint: receive a customer message, return the agent's reply.
-
-    FastAPI automatically:  
-      - parses the JSON body into a CustomerMessage (running all our
-        input-validation rules; invalid input returns 422 without ever
-        reaching the pipeline)
-      - serializes the returned AgentReply back to JSON
-
-    The orchestrator is called exactly as the CLI calls it — this endpoint
-    adds no business logic of its own.
     """
-    
-    
-    
     set_request_context(
         store_id=message.store_id,
         conversation_id=message.conversation_id,
     )
     logger.info("Received message", extra={"channel": message.channel})
-    return handle_message(message)
+
+    started = time.monotonic()
+    status_code = 200
+    try:
+        return handle_message(message)
+    except Exception:
+        status_code = 500
+        raise
+    finally:
+        latency_ms = (time.monotonic() - started) * 1000
+        record_request(status_code=status_code, store_id=message.store_id, latency_ms=latency_ms)

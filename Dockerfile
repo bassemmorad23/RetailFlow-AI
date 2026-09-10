@@ -2,13 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-
 # System dependencies needed to build some Python packages.
 # Cleaned up in the same layer to keep image size down.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
-
 
 # Install CPU-only torch FIRST, and separately from requirements.txt.
 # Doing this in its own layer means Docker's build cache reuses it
@@ -16,14 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # dependency is not re-downloaded on every rebuild.
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-
 # Install the rest of the dependencies.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-
-COPY app/ ./app/
-
+COPY app/ .
 
 # Pre-download the local HF models at BUILD time, not at first request.
 # This makes container startup fast and independent of HuggingFace Hub
