@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app/ .
+COPY app/ ./app/
 
 # Pre-download the local HF models at BUILD time, not at first request.
 # This makes container startup fast and independent of HuggingFace Hub
