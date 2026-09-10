@@ -45,6 +45,7 @@ import time
 from fastapi.responses import JSONResponse
 from app.metrics import record_request, get_metrics
 from app.log_context import set_request_context, clear_request_context, get_request_context
+from fastapi.responses import RedirectResponse
 
 
 
@@ -74,6 +75,12 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect the bare domain to the interactive API docs."""
+    return RedirectResponse(url="/docs")
 
 
 @app.middleware("http")
