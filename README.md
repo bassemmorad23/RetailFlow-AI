@@ -58,8 +58,8 @@ POST /chat
 ```json
 {
   "reply_text": "Great! We have the Red Summer Dress by Zara in size M — lightweight floral cotton, 12 in stock at 1,499 EGP. Would you like to see it or try it on?",
-  "emotion":  { "label": "neutral", "confidence": 0.59 },
-  "intent":   { "label": "asking_details", "confidence": 0.57 },
+  "emotion": { "label": "neutral", "confidence": 0.59 },
+  "intent": { "label": "asking_details", "confidence": 0.57 },
   "recommendations": [
     { "product_id": "prod_001", "name": "Red Summer Dress", "price": 1499 }
   ]
@@ -104,14 +104,14 @@ Output: { "preferred_size": "L", "preferred_color": "black", "mentioned_products
 
 ## Production stack (live)
 
-| Layer | Service | Purpose |
-| --- | --- | --- |
-| API host | Railway | FastAPI backend, public HTTPS URL |
-| Catalog + memory DB | MongoDB Atlas | Products, policies, FAQ, store info, conversations |
-| Vector search | Qdrant Cloud | Per-store collections, semantic retrieval |
-| LLM | OpenRouter | Response generation + fact extraction, multi-model chain |
-| Error monitoring | Sentry | Auto-capture of exceptions with request context |
-| Uptime monitoring | UptimeRobot | 5-minute health checks + alerts |
+| Layer               | Service       | Purpose                                                  |
+| ------------------- | ------------- | -------------------------------------------------------- |
+| API host            | Railway       | FastAPI backend, public HTTPS URL                        |
+| Catalog + memory DB | MongoDB Atlas | Products, policies, FAQ, store info, conversations       |
+| Vector search       | Qdrant Cloud  | Per-store collections, semantic retrieval                |
+| LLM                 | OpenRouter    | Response generation + fact extraction, multi-model chain |
+| Error monitoring    | Sentry        | Auto-capture of exceptions with request context          |
+| Uptime monitoring   | UptimeRobot   | 5-minute health checks + alerts                          |
 
 ---
 
@@ -119,14 +119,14 @@ Output: { "preferred_size": "L", "preferred_color": "black", "mentioned_products
 
 > **Important:** These are small, hand-crafted starter datasets intended as engineering baselines — not production benchmarks. Real customer data will replace them as it becomes available.
 
-| Component | Result |
-| --- | --- |
-| Intent classification (n=40) | 70.0% accuracy, 0.67 macro F1 |
-| Emotion classification (n=48) | 75.0% accuracy, 0.72 macro F1 |
-| Fact extraction (n=24) | 100% precision on every field, 0 hallucinations on n=24 |
-| RAG retrieval (n=25) | 90.9% recall@1, 95.5% recall@3, 0 false positives on out-of-catalog queries |
-| Recommendation (n=14) | 100% correct on positive cases; safety gate blocks recommendations during complaints |
-| Multi-tenant isolation | Verified across memory, RAG, and recommendation — zero cross-store leaks |
+| Component                     | Result                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| Intent classification (n=40)  | 70.0% accuracy, 0.67 macro F1                                                        |
+| Emotion classification (n=48) | 75.0% accuracy, 0.72 macro F1                                                        |
+| Fact extraction (n=24)        | 100% precision on every field, 0 hallucinations on n=24                              |
+| RAG retrieval (n=25)          | 90.9% recall@1, 95.5% recall@3, 0 false positives on out-of-catalog queries          |
+| Recommendation (n=14)         | 100% correct on positive cases; safety gate blocks recommendations during complaints |
+| Multi-tenant isolation        | Verified across memory, RAG, and recommendation — zero cross-store leaks             |
 
 Details: [`docs/evaluation.md`](docs/evaluation.md)
 
@@ -188,22 +188,22 @@ Full detail: [`docs/architecture.md`](docs/architecture.md)
 
 ## Tech stack
 
-| Layer | Technology |
-| --- | --- |
-| API | FastAPI, Uvicorn |
-| Data validation | Pydantic v2, pydantic-settings |
-| Emotion | `j-hartmann/emotion-english-distilroberta-base` |
-| Intent | `facebook/bart-large-mnli` (zero-shot) |
-| Query embeddings | Sentence-Transformers (`all-MiniLM-L6-v2`) |
-| Vector store | Qdrant Cloud |
-| Response + fact extraction | OpenRouter (OpenAI-compatible API) |
-| Retry | Tenacity |
-| Memory + catalog | MongoDB Atlas |
-| Container | Docker |
-| Deployment | Railway |
-| Error monitoring | Sentry |
-| Uptime monitoring | UptimeRobot |
-| Testing | Pytest |
+| Layer                      | Technology                                      |
+| -------------------------- | ----------------------------------------------- |
+| API                        | FastAPI, Uvicorn                                |
+| Data validation            | Pydantic v2, pydantic-settings                  |
+| Emotion                    | `j-hartmann/emotion-english-distilroberta-base` |
+| Intent                     | `facebook/bart-large-mnli` (zero-shot)          |
+| Query embeddings           | Sentence-Transformers (`all-MiniLM-L6-v2`)      |
+| Vector store               | Qdrant Cloud                                    |
+| Response + fact extraction | OpenRouter (OpenAI-compatible API)              |
+| Retry                      | Tenacity                                        |
+| Memory + catalog           | MongoDB Atlas                                   |
+| Container                  | Docker                                          |
+| Deployment                 | Railway                                         |
+| Error monitoring           | Sentry                                          |
+| Uptime monitoring          | UptimeRobot                                     |
+| Testing                    | Pytest                                          |
 
 ---
 
@@ -233,6 +233,7 @@ Full setup guide: [`docs/deployment.md`](docs/deployment.md)
 ## Roadmap
 
 **Completed**
+
 - Multi-tenant architecture (data + memory + RAG + recommendation, all `store_id`-scoped, verified with 2 live stores)
 - Production deployment (Railway + MongoDB Atlas + Qdrant Cloud)
 - Observability (structured JSON logs, request context, per-step timing, Sentry, `/metrics`, UptimeRobot)
@@ -240,6 +241,7 @@ Full setup guide: [`docs/deployment.md`](docs/deployment.md)
 - Evaluation suite for intent, emotion, fact extraction, RAG, and recommendation
 
 **Next**
+
 - Website chat widget (frontend integration in progress)
 - Store onboarding flow (self-service store creation)
 - Auto-sync of catalog changes into Qdrant (currently a manual rebuild)
