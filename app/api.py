@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="StoreFlow AI",
-    description="AI sales agent for clothing stores.",
+    description="Multi-tenant AI sales agent for retail stores.",
     version="0.1.0",
 )
 
