@@ -130,8 +130,14 @@ def _classify_failure(exc: BaseException) -> str:
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception(_is_retryable),
 )
-def _call_single_model(model: str, text: str) -> str:
-    """One extraction call to one model, with retry-on-transient-error."""
+
+def _call_single_model(model: str, text: str) -> tuple[str, dict]:
+    """
+    One extraction call to one model, with retry-on-transient-error.
+
+    Returns (reply_text, usage_dict) so the caller can log token usage.
+    usage_dict is {} when the provider doesn't return usage info.
+    """
     response = _client.chat.completions.create(
         model=model,
         messages=[
@@ -144,7 +150,17 @@ def _call_single_model(model: str, text: str) -> str:
     if not response.choices:
         raise ValueError(f"Model {model} returned no choices in response.")
 
-    return response.choices[0].message.content.strip()
+    reply_text = response.choices[0].message.content.strip()
+
+    usage: dict = {}
+    if response.usage is not None:
+        usage = {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+
+    return reply_text, usage
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +178,7 @@ def extract_facts(text: str) -> dict[str, Any]:
     for model in settings.response_model_chain:
         started = time.monotonic()
         try:
-            raw = _call_single_model(model, text)
+            raw, usage = _call_single_model(model, text)
             latency_ms = int((time.monotonic() - started) * 1000)
 
             parsed = _parse_facts(raw)
@@ -172,6 +188,9 @@ def extract_facts(text: str) -> dict[str, Any]:
                     "model": model,
                     "latency_ms": latency_ms,
                     "fact_count": len(parsed),
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
                 },
             )
             return parsed

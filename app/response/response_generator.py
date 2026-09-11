@@ -147,12 +147,16 @@ def _classify_failure(exc: BaseException) -> str:
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception(_is_retryable),
 )
-def _call_single_model(model: str, prompt: str) -> str:
+
+def _call_single_model(model: str, prompt: str) -> tuple[str, dict]:
     """
     One call to one specific model, wrapped in retry-with-backoff. If a
     retryable exception is raised, tenacity waits and calls this function
     again on the same model. If a non-retryable exception is raised, or
     if all retry attempts are exhausted, the exception propagates.
+
+    Returns (reply_text, usage_dict) so the caller can log token usage.
+    usage_dict is {} when the provider doesn't return usage info.
     """
     response = _client.chat.completions.create(
         model=model,
@@ -165,8 +169,17 @@ def _call_single_model(model: str, prompt: str) -> str:
     if not response.choices:
         raise ValueError(f"Model {model} returned no choices in response.")
 
-    return response.choices[0].message.content.strip()
+    reply_text = response.choices[0].message.content.strip()
 
+    usage: dict = {}
+    if response.usage is not None:
+        usage = {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+
+    return reply_text, usage
 
 # ---------------------------------------------------------------------------
 # PUBLIC: pipeline entrypoint
@@ -197,13 +210,16 @@ def generate_response(
     for model in settings.response_model_chain:
         started = time.monotonic()
         try:
-            reply = _call_single_model(model, prompt)
+            reply, usage = _call_single_model(model, prompt)
             latency_ms = int((time.monotonic() - started) * 1000)
             logger.info(
                 "Response generated",
                 extra={
                     "model": model,
                     "latency_ms": latency_ms,
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
                 },
             )
             return reply
