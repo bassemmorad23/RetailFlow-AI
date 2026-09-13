@@ -17,9 +17,7 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     
     response_model_chain: list[str] = [
-    "nvidia/nemotron-3-ultra-550b-a55b:free",
-    
-    "poolside/laguna-s-2.1:free",
+    "openrouter/free"
 ]
     
     
