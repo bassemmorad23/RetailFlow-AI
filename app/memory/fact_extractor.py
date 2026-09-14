@@ -57,19 +57,14 @@ from tenacity import (
 )
 
 from app.config import settings
-
+from app.industries.registry import get_fields_for_industry
+from app.schemas.models import FieldDefinition
 
 logger = logging.getLogger(__name__)
 
 
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-_ALLOWED_FIELDS = {
-    "preferred_size",
-    "preferred_color",
-    "budget_max",
-    "mentioned_products",
-}
 
 _client = OpenAI(
     base_url=_OPENROUTER_BASE_URL,
@@ -77,21 +72,40 @@ _client = OpenAI(
     timeout=30.0,
 )
 
-_SYSTEM_PROMPT = """You are an extraction assistant. Read the customer's message
+
+def _build_extraction_prompt(industry_id: str) -> str:
+    """Build extraction prompt dynamically from industry's FieldDefinitions."""
+    fields = get_fields_for_industry(industry_id)
+    
+    field_lines = []
+    for f in fields:
+        line = f"- {f.canonical_name}: {f.field_type}"
+        if f.unit:
+            line += f" ({f.unit})"
+        if f.allowed_values:
+            line += f" — one of {f.allowed_values}"
+        if f.extraction_hint:
+            line += f". {f.extraction_hint}"
+        field_lines.append(line)
+    
+    fields_block = "\n".join(field_lines)
+    
+    return f"""You are an extraction assistant. Read the customer's message
 and extract only the facts they explicitly stated about their preferences.
 
 Return a valid JSON object with any of these optional keys:
-- preferred_size: string (e.g., "M", "L", "XL")
-- preferred_color: string (lowercase, e.g., "red")
-- budget_max: number (in the store's currency)
-- mentioned_products: list of product-type strings the customer named
+{fields_block}
 
 Rules:
 - Only include a key if the message clearly states it.
 - Do NOT guess. Do NOT invent.
-- If nothing is stated, return exactly: {}
+- If nothing is stated, return exactly: {{}}
 - Output ONLY the JSON. No prose, no code fences.
 """
+
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -131,22 +145,18 @@ def _classify_failure(exc: BaseException) -> str:
     retry=retry_if_exception(_is_retryable),
 )
 
-def _call_single_model(model: str, text: str) -> tuple[str, dict]:
-    """
-    One extraction call to one model, with retry-on-transient-error.
-
-    Returns (reply_text, usage_dict) so the caller can log token usage.
-    usage_dict is {} when the provider doesn't return usage info.
-    """
+def _call_single_model(model: str, text: str, industry_id: str) -> tuple[str, dict]:
+    """..."""
+    system_prompt = _build_extraction_prompt(industry_id)
     response = _client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": text},
         ],
         temperature=0,
     )
-
+    
     if not response.choices:
         raise ValueError(f"Model {model} returned no choices in response.")
 
@@ -167,21 +177,27 @@ def _call_single_model(model: str, text: str) -> tuple[str, dict]:
 # PUBLIC
 # ---------------------------------------------------------------------------
 
-def extract_facts(text: str) -> dict[str, Any]:
+def extract_facts(text: str, industry_id: str | None) -> dict[str, Any]:
     """
     Extract stated facts from a single customer message. Walks the
     configured model chain and stops at the first success.
     """
+    # Lenient V1: no industry means no industry-specific extraction.
+    # Return {} without calling the LLM (saves cost + latency).
+    if industry_id is None:
+        return {}
+    
+    
     if not text or not text.strip():
         return {}
 
     for model in settings.response_model_chain:
         started = time.monotonic()
         try:
-            raw, usage = _call_single_model(model, text)
+            raw, usage = _call_single_model(model, text, industry_id)
             latency_ms = int((time.monotonic() - started) * 1000)
 
-            parsed = _parse_facts(raw)
+            parsed = _parse_facts(raw, industry_id)
             logger.info(
                 "Facts extracted",
                 extra={
@@ -215,15 +231,138 @@ def extract_facts(text: str) -> dict[str, Any]:
     return {}
 
 
+
+
+# ---------------------------------------------------------------------------
+# VALUE NORMALIZATION & VALIDATION
+# ---------------------------------------------------------------------------
+
+
+
+def _normalize_value(value: Any, field) -> Any:
+    """
+    Coerce and normalize a raw value against its FieldDefinition.
+
+    Returns the normalized value, or None if coercion is impossible
+    (wrong type entirely, e.g. list where int expected).
+    """
+    rules = field.normalization_rules or {}
+
+    # Type coercion
+    if field.field_type == "int":
+        try:
+            if isinstance(value, str):
+                # Strip common unit suffixes ("8 GB" -> "8")
+                if rules.get("strip_units"):
+                    value = re.sub(r"[a-zA-Z\s]+$", "", value).strip()
+                return int(float(value))
+            if isinstance(value, (int, float)):
+                return int(value)
+            return None
+        except (ValueError, TypeError):
+            return None
+
+    if field.field_type == "float":
+        try:
+            if isinstance(value, str):
+                if rules.get("strip_units"):
+                    value = re.sub(r"[a-zA-Z\s]+$", "", value).strip()
+                return float(value)
+            if isinstance(value, (int, float)):
+                return float(value)
+            return None
+        except (ValueError, TypeError):
+            return None
+
+    if field.field_type == "boolean":
+        if isinstance(value, bool):
+            return value
+        return None
+
+    if field.field_type in ("string", "enum"):
+        if not isinstance(value, str):
+            return None
+        s = value
+
+        if rules.get("trim", True):
+            s = s.strip()
+
+        case = rules.get("case")
+        if case == "lower":
+            s = s.lower()
+        elif case == "upper":
+            s = s.upper()
+        elif case == "title":
+            s = s.title()
+
+        # Apply alias mapping (e.g. "large" -> "L")
+        aliases = rules.get("aliases", {})
+        if s.lower() in {k.lower() for k in aliases}:
+            for k, v in aliases.items():
+                if k.lower() == s.lower():
+                    s = v
+                    break
+
+        if not s:
+            return None
+        return s
+
+    # Unknown field_type — refuse rather than guess
+    return None
+
+
+def _validate_value(value: Any, field) -> bool:
+    """
+    Check a normalized value against the FieldDefinition's rules.
+
+    Returns True if valid, False otherwise.
+    """
+    rules = field.validation_rules or {}
+
+    # Enum: value must be in allowed_values
+    if field.field_type == "enum":
+        if field.allowed_values and value not in field.allowed_values:
+            return False
+
+    # Numeric bounds
+    if field.field_type in ("int", "float"):
+        if "min" in rules and value < rules["min"]:
+            return False
+        if "max" in rules and value > rules["max"]:
+            return False
+
+    # String length bounds
+    if field.field_type == "string":
+        if "min_length" in rules and len(value) < rules["min_length"]:
+            return False
+        if "max_length" in rules and len(value) > rules["max_length"]:
+            return False
+
+    return True
+
+
+
+
+
+
+
 # ---------------------------------------------------------------------------
 # PARSING HELPERS
 # ---------------------------------------------------------------------------
 
-def _parse_facts(raw: str) -> dict[str, Any]:
+def _parse_facts(raw: str, industry_id: str) -> dict[str, Any]:
     """
-    Turn the model's raw text into a safe dict. Handles common failure
-    modes (code fences, prose leading up to JSON, malformed output) by
-    silently returning {} rather than raising.
+    Turn the model's raw text into a safe dict, validated against
+    the industry's FieldDefinitions.
+
+    For each key the LLM returned:
+      - Drop it if the industry doesn't define this canonical name
+      - Coerce to the FieldDefinition's field_type
+      - Apply normalization (case, trim, alias mapping)
+      - Enforce validation rules (min/max, allowed_values, min/max length)
+      - Drop it if validation fails
+
+    Anything malformed silently becomes {} — never raises.
     """
     if not raw:
         return {}
@@ -246,18 +385,26 @@ def _parse_facts(raw: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         return {}
 
+    # Build a lookup: canonical_name -> FieldDefinition for this industry
+    industry_fields = {
+        f.canonical_name: f
+        for f in get_fields_for_industry(industry_id)
+    }
+
     result: dict[str, Any] = {}
     for key, value in parsed.items():
-        if key not in _ALLOWED_FIELDS:
+        field = industry_fields.get(key)
+        if field is None:
+            # LLM returned a key not defined for this industry — drop it
             continue
-        if key == "mentioned_products":
-            if isinstance(value, list) and all(isinstance(v, str) for v in value):
-                result[key] = value
-        elif key == "budget_max":
-            if isinstance(value, (int, float)):
-                result[key] = float(value)
-        elif key in {"preferred_size", "preferred_color"}:
-            if isinstance(value, str) and value.strip():
-                result[key] = value.strip()
+
+        normalized = _normalize_value(value, field)
+        if normalized is None:
+            continue
+
+        if not _validate_value(normalized, field):
+            continue
+
+        result[key] = normalized
 
     return result

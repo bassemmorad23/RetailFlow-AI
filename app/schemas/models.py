@@ -12,11 +12,9 @@ import re
 
 
 class EmotionLabel(str, Enum):
-    """Application-level emotion labels used across the pipeline."""
-
     NEUTRAL = "neutral"
     HAPPY = "happy"
-    FRUSTRATED = "frustrated"
+    SADNESS = "sadness"
     ANGRY = "angry"
     CONFUSED = "confused"
     EXCITED = "excited"
@@ -299,19 +297,29 @@ class ConversationTurn(BaseModel):
 
     role: Literal["customer", "agent"]
     text: str
-    timestamp: str
+    timestamp: str | None = None
 
     class Config:
         extra = "forbid"
 
 
 class KnownFacts(BaseModel):
-    """Structured facts we've inferred about the customer over time."""
-
-    preferred_size: Optional[str] = None
-    preferred_color: Optional[str] = None
-    budget_max: Optional[float] = None
+    """
+    Structured facts we've inferred about the customer over time.
+    
+    Legacy top-level fields kept for backward compatibility with
+    existing MongoDB data. New industry-specific facts (ram_gb, size,
+    color, etc.) land in `preferences` dict, keyed by canonical
+    FieldDefinition name.
+    """
+    # Legacy fields — kept until existing data migrated (Week 4 R8)
+    preferred_size: str | None = None
+    preferred_color: str | None = None
+    budget_max: float | None = None
     mentioned_products: list[str] = Field(default_factory=list)
+
+    # Dynamic per-industry preferences (canonical_name -> value)
+    preferences: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         extra = "forbid"
@@ -320,6 +328,7 @@ class KnownFacts(BaseModel):
 class MemoryState(BaseModel):
     """The full memory context for a conversation."""
 
+    conversation_id: str
     history: list[ConversationTurn] = Field(default_factory=list)
     known_facts: KnownFacts = Field(default_factory=KnownFacts)
 
@@ -789,4 +798,55 @@ class IndustryConfig(BaseModel):
         Reject extra fields so typos in IndustryConfig construction
         fail loudly rather than silently being ignored.
         """
+        extra = "forbid"
+        
+        
+
+
+# ---------------------------------------------------------------------------
+# Per-store settings
+# ---------------------------------------------------------------------------
+
+
+class StoreSettings(BaseModel):
+    """
+    Per-store configuration stored in MongoDB.
+
+    One document per store, keyed by store_id. Grows over time as
+    new configurable behaviors are added — channels, sync credentials,
+    branding, etc. Today it holds industry only.
+
+    WHY THIS EXISTS AS A SCHEMA:
+    - Multi-tenant scoping: every store's config is isolated
+    - Validation: prevents typos in industry names, malformed channel toggles
+    - Type safety: downstream code gets a real object, not a dict-of-anything
+    - Migration path: adding fields is a schema change, not a data-shape guess
+
+    WHY industry IS OPTIONAL:
+    Lenient V1 rule — stores may exist before industry is assigned
+    (e.g. store_002 was created before the multi-industry system).
+    Pipeline modules that need industry treat None as "no industry-
+    specific behavior, use generic defaults".
+    """
+
+    store_id: str = Field(
+        min_length=1,
+        description=(
+            "Multi-tenant identifier — matches store_id used throughout "
+            "the pipeline (CustomerMessage, Product, MemoryState, etc.)."
+        ),
+    )
+
+    industry: Optional[str] = Field(
+        default=None,
+        description=(
+            "The industry this store belongs to (must match an "
+            "IndustryConfig.industry_id in the registry, e.g. 'fashion', "
+            "'smartphones', 'laptops'). None means no industry assigned "
+            "yet — pipeline uses generic behavior. Set once at merchant "
+            "onboarding, rarely changed after."
+        ),
+    )
+
+    class Config:
         extra = "forbid"

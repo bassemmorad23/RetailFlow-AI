@@ -50,6 +50,7 @@ from app.emotion.emotion_detector import detect_emotion
 from app.intent.intent_detector import detect_intent
 from app.memory.conversation_memory import get_memory, add_turn, update_known_facts
 from app.memory.fact_extractor import extract_facts
+from app.settings.store_settings import get_industry
 from app.rag.retriever import retrieve_context
 from app.recommendation.product_recommender import recommend_products
 from app.response.response_generator import generate_response
@@ -176,6 +177,13 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         ),
         [],
     )
+    
+    industry_id = _time_step(
+            "industry_lookup",
+            lambda: get_industry(message.store_id),
+            None,
+        )
+    
 
     reply_text = _time_step(
         "response_generation",
@@ -186,6 +194,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             memory=memory,
             retrieved_context=retrieved_context,
             recommendations=recommendations,
+            industry_id=industry_id,
         ),
         "Sorry, I could not process your message.",
     )
@@ -204,18 +213,24 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         None,
     )
 
+    
+
     new_facts = _time_step(
         "fact_extraction",
-        lambda: extract_facts(message.text),
+        lambda: extract_facts(message.text, industry_id),
         {},
     )
 
     if new_facts:
         _time_step(
-            "memory_update_facts",
-            lambda: update_known_facts(message.store_id, message.conversation_id, **new_facts),
-            None,
-        )
+        "memory_update_facts",
+        lambda: update_known_facts(
+            message.store_id,
+            message.conversation_id,
+            preferences={**memory.known_facts.preferences, **new_facts},
+        ),
+        None,
+    )
 
     reply = AgentReply(
         conversation_id=message.conversation_id,
