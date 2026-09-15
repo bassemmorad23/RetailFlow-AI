@@ -28,11 +28,15 @@ explicitly allows them. `allow_origins=["*"]` is fine for development;
 tighten this to the real store domains before onboarding real customers.
 """
 
+
+
+
 import logging
-
-from fastapi import FastAPI , Request , Depends
+from fastapi import FastAPI , Request , Depends , UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.ingestion.csv_adapter import CSVAdapter
+from app.ingestion.ingestion_service import ingest_products, IngestionResult
+from app.settings.store_settings import get_industry
 from app.core.orchestrator import handle_message
 from app.logging_config import setup_logging
 from app.schemas.models import AgentReply, CustomerMessage
@@ -148,3 +152,63 @@ def chat(request: Request, message: CustomerMessage, _rate_limit: None = Depends
     finally:
         latency_ms = (time.monotonic() - started) * 1000
         record_request(status_code=status_code, store_id=message.store_id, latency_ms=latency_ms)
+
+
+
+        
+@app.post("/stores/{store_id}/products/upload", response_model=IngestionResult)
+def upload_products(store_id: str, file: UploadFile = File(...)) -> IngestionResult:
+    """
+    Upload a CSV or Excel product catalog for a store.
+    Upserts by product_id. Returns summary with created/updated/failed
+    counts and any unmapped columns.
+    """
+    set_request_context(store_id=store_id)
+    logger.info("Product upload received", extra={"upload_filename": file.filename})
+
+    # Store must have an industry configured before ingestion.
+    industry_id = get_industry(store_id)
+    if industry_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Store '{store_id}' has no industry set. "
+                f"Configure the industry before uploading products."
+            ),
+        )
+
+    # Validate file type
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be .csv, .xlsx, or .xls",
+        )
+
+    # Read bytes into memory (small-file assumption for MVP)
+    file_bytes = file.file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    try:
+        adapter = CSVAdapter(file_bytes, filename)
+        result = ingest_products(adapter, store_id, industry_id)
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        print("=== INGESTION ERROR ===")
+        print(tb)
+        print("=== END ===")
+
+        logger.exception("Ingestion failed")
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}")
+
+    logger.info(
+    "Upload complete",
+    extra={
+        "upload_created": result.created,
+        "upload_updated": result.updated,
+        "upload_failed": result.failed,
+    },
+    )
+    return result
