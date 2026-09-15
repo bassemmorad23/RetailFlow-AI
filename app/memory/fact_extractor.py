@@ -76,7 +76,7 @@ _client = OpenAI(
 def _build_extraction_prompt(industry_id: str) -> str:
     """Build extraction prompt dynamically from industry's FieldDefinitions."""
     fields = get_fields_for_industry(industry_id)
-    
+
     field_lines = []
     for f in fields:
         line = f"- {f.canonical_name}: {f.field_type}"
@@ -87,19 +87,32 @@ def _build_extraction_prompt(industry_id: str) -> str:
         if f.extraction_hint:
             line += f". {f.extraction_hint}"
         field_lines.append(line)
-    
-    fields_block = "\n".join(field_lines)
-    
-    return f"""You are an extraction assistant. Read the customer's message
-and extract only the facts they explicitly stated about their preferences.
 
-Return a valid JSON object with any of these optional keys:
+    fields_block = "\n".join(field_lines)
+
+    return f"""You are an extraction assistant. Read the customer's message
+and extract facts they stated about their preferences.
+
+For each fact, classify it as HARD or SOFT:
+- HARD = mandatory constraint. Words like "must", "need", "only",
+  "at least", "under $X", "no less than". Filter must enforce it.
+- SOFT = preference that influences ranking but doesn't exclude.
+  Words like "prefer", "would like", "if possible", "nice to have".
+
+Return a valid JSON object with this exact structure:
+{{
+  "hard_constraints": {{ ... }},
+  "soft_preferences": {{ ... }}
+}}
+
+Where each inner dict may include any of these keys:
 {fields_block}
 
 Rules:
 - Only include a key if the message clearly states it.
 - Do NOT guess. Do NOT invent.
-- If nothing is stated, return exactly: {{}}
+- If unsure whether hard or soft, treat as soft (safer — no exclusion).
+- If nothing is stated, return: {{"hard_constraints": {{}}, "soft_preferences": {{}}}}
 - Output ONLY the JSON. No prose, no code fences.
 """
 
@@ -185,11 +198,11 @@ def extract_facts(text: str, industry_id: str | None) -> dict[str, Any]:
     # Lenient V1: no industry means no industry-specific extraction.
     # Return {} without calling the LLM (saves cost + latency).
     if industry_id is None:
-        return {}
+        return {"hard_constraints": {}, "soft_preferences": {}}
     
     
     if not text or not text.strip():
-        return {}
+        return {"hard_constraints": {}, "soft_preferences": {}}
 
     for model in settings.response_model_chain:
         started = time.monotonic()
@@ -203,7 +216,7 @@ def extract_facts(text: str, industry_id: str | None) -> dict[str, Any]:
                 extra={
                     "model": model,
                     "latency_ms": latency_ms,
-                    "fact_count": len(parsed),
+                    "fact_count": len(parsed["hard_constraints"]) + len(parsed["soft_preferences"]),
                     "prompt_tokens": usage.get("prompt_tokens"),
                     "completion_tokens": usage.get("completion_tokens"),
                     "total_tokens": usage.get("total_tokens"),
@@ -228,7 +241,7 @@ def extract_facts(text: str, industry_id: str | None) -> dict[str, Any]:
         "All models in chain failed for fact extraction; returning {}",
         extra={"chain_length": len(settings.response_model_chain)},
     )
-    return {}
+    return {"hard_constraints": {}, "soft_preferences": {}}
 
 
 
@@ -350,22 +363,15 @@ def _validate_value(value: Any, field) -> bool:
 # PARSING HELPERS
 # ---------------------------------------------------------------------------
 
-def _parse_facts(raw: str, industry_id: str) -> dict[str, Any]:
+def _parse_facts(raw: str, industry_id: str) -> dict[str, dict[str, Any]]:
     """
-    Turn the model's raw text into a safe dict, validated against
-    the industry's FieldDefinitions.
-
-    For each key the LLM returned:
-      - Drop it if the industry doesn't define this canonical name
-      - Coerce to the FieldDefinition's field_type
-      - Apply normalization (case, trim, alias mapping)
-      - Enforce validation rules (min/max, allowed_values, min/max length)
-      - Drop it if validation fails
-
-    Anything malformed silently becomes {} — never raises.
+    Parse LLM output into {'hard_constraints': {...}, 'soft_preferences': {...}}.
+    Both dicts validated against industry's FieldDefinitions.
     """
+    empty = {"hard_constraints": {}, "soft_preferences": {}}
+
     if not raw:
-        return {}
+        return empty
 
     cleaned = raw.strip()
     cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
@@ -374,37 +380,39 @@ def _parse_facts(raw: str, industry_id: str) -> dict[str, Any]:
     match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if match is None:
         logger.debug("Fact extraction returned non-JSON; ignoring")
-        return {}
+        return empty
 
     try:
         parsed = json.loads(match.group(0))
     except json.JSONDecodeError:
         logger.debug("Fact extraction returned malformed JSON; ignoring")
-        return {}
+        return empty
 
     if not isinstance(parsed, dict):
-        return {}
+        return empty
 
-    # Build a lookup: canonical_name -> FieldDefinition for this industry
     industry_fields = {
         f.canonical_name: f
         for f in get_fields_for_industry(industry_id)
     }
 
-    result: dict[str, Any] = {}
-    for key, value in parsed.items():
-        field = industry_fields.get(key)
-        if field is None:
-            # LLM returned a key not defined for this industry — drop it
-            continue
+    def _validate_bucket(bucket: Any) -> dict[str, Any]:
+        if not isinstance(bucket, dict):
+            return {}
+        result: dict[str, Any] = {}
+        for key, value in bucket.items():
+            field = industry_fields.get(key)
+            if field is None:
+                continue
+            normalized = _normalize_value(value, field)
+            if normalized is None:
+                continue
+            if not _validate_value(normalized, field):
+                continue
+            result[key] = normalized
+        return result
 
-        normalized = _normalize_value(value, field)
-        if normalized is None:
-            continue
-
-        if not _validate_value(normalized, field):
-            continue
-
-        result[key] = normalized
-
-    return result
+    return {
+        "hard_constraints": _validate_bucket(parsed.get("hard_constraints", {})),
+        "soft_preferences": _validate_bucket(parsed.get("soft_preferences", {})),
+    }

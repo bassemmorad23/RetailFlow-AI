@@ -167,6 +167,12 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         lambda: retrieve_context(message.store_id, message.text),
         [],
     )
+    
+    industry_id = _time_step(
+        "industry_lookup",
+        lambda: get_industry(message.store_id),
+        None,
+    )
 
     recommendations = _time_step(
         "recommendation",
@@ -174,17 +180,13 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             intent=intent,
             memory=memory,
             retrieved_context=retrieved_context,
+            store_id=message.store_id,
+            industry_id=industry_id,
         ),
         [],
     )
     
-    industry_id = _time_step(
-            "industry_lookup",
-            lambda: get_industry(message.store_id),
-            None,
-        )
     
-
     reply_text = _time_step(
         "response_generation",
         lambda: generate_response(
@@ -222,12 +224,17 @@ def handle_message(message: CustomerMessage) -> AgentReply:
     )
 
     if new_facts:
+        hard = {**memory.known_facts.hard_constraints, **new_facts.get("hard_constraints", {})}
+        soft = {**memory.known_facts.soft_preferences, **new_facts.get("soft_preferences", {})}
+
+
         _time_step(
         "memory_update_facts",
         lambda: update_known_facts(
             message.store_id,
             message.conversation_id,
-            preferences={**memory.known_facts.preferences, **new_facts},
+            hard_constraints=hard,
+            soft_preferences=soft
         ),
         None,
     )

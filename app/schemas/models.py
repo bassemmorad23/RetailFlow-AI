@@ -320,6 +320,12 @@ class KnownFacts(BaseModel):
 
     # Dynamic per-industry preferences (canonical_name -> value)
     preferences: dict[str, Any] = Field(default_factory=dict)
+    
+    # Hard constraints — MUST be satisfied by recommended products
+    hard_constraints: dict[str, Any] = Field(default_factory=dict)
+    
+    # Soft preferences — influence ranking, not filtering
+    soft_preferences: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         extra = "forbid"
@@ -457,6 +463,17 @@ class FieldDefinition(BaseModel):
             "(e.g. '8 GB' vs '8GB' vs '8gb')."
         ),
     )
+    comparison_operator: Literal["==", ">=", "<=", "range"] = Field(
+        default="==",
+        description=(
+            "How to compare product values against customer constraints. "
+            "'>=' means bigger is better (RAM, storage, screen_size). "
+            "'<=' means smaller is better (price, weight). "
+            "'==' means exact match (color, brand, OS). "
+            "'range' means match within a tolerance of the requested value."
+        ),
+    )
+    
 
     # ---- Aliases (multilingual, multi-format) ----
 

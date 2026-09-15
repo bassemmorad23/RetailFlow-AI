@@ -75,6 +75,7 @@ RAM_GB_FIELD = FieldDefinition(
     ),
     field_type="int",
     unit="GB",
+    comparison_operator=">=",
     aliases=[
         "ram", "RAM", "Ram",
         "memory", "Memory", "MEMORY",
@@ -115,6 +116,7 @@ STORAGE_GB_FIELD = FieldDefinition(
     ),
     field_type="int",
     unit="GB",
+    comparison_operator=">=",
     aliases=[
         "storage", "Storage", "STORAGE",
         "rom", "ROM",
@@ -152,6 +154,7 @@ SCREEN_SIZE_INCHES_FIELD = FieldDefinition(
     ),
     field_type="float",
     unit="inches",
+    comparison_operator=">=",
     aliases=[
         "screen_size", "screen size", "Screen Size",
         "display_size", "display size",
@@ -208,6 +211,7 @@ OS_FIELD = FieldDefinition(
     },
     validation_rules={},
     industries=["smartphones"],
+    comparison_operator="==",
     is_specification=False,
     extraction_hint=(
         "The operating system the customer wants. iOS means Apple "
@@ -242,6 +246,7 @@ COLOR_FIELD = FieldDefinition(
         "max_length": 40,
     },
     industries=["smartphones"],
+    comparison_operator="==",
     is_specification=False,
     extraction_hint=(
         "A color the customer wants. Common: black, white, blue, "
