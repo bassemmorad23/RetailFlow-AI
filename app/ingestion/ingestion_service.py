@@ -6,6 +6,7 @@ Returns a summary the merchant can act on.
 
 import logging
 from typing import Any
+from unittest import result
 
 from pydantic import BaseModel, Field
 
@@ -40,18 +41,24 @@ def ingest_products(
     """
     result = IngestionResult(source=adapter.get_source_name())
 
-    # 1. Column mapping
-    source_cols = adapter.get_source_columns(store_id)
-    mapping = map_columns(source_cols, industry_id)
-    result.unmapped_columns = mapping.unmapped
-    result.conflict_columns = mapping.conflicts
-
-    # 2. Fetch raw rows
+    # 1. Fetch raw rows first (needed to know actual columns)
     rows = adapter.fetch_raw_products(store_id)
     result.total_rows = len(rows)
-
+    
     if not rows:
         return result
+
+    # 2. Build column mapping from union of keys across all rows
+    # (adapters like WC produce dynamic keys per product via flattened attributes)
+    
+    all_keys: set[str] = set()
+    for row in rows:
+        all_keys.update(row.keys())
+        
+    mapping = map_columns(sorted(all_keys), industry_id)
+    result.unmapped_columns = mapping.unmapped
+    result.conflict_columns = mapping.conflicts
+    
 
     # 3. Convert + upsert
     col = _get_collection()
