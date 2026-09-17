@@ -65,7 +65,7 @@ class WooCommerceAdapter(SourceAdapter):
             )
 
         base_url = creds["site_url"].rstrip("/")
-        auth = (creds["consumer_key"], creds["consumer_secret"])
+        auth = (creds["username"], creds["password"])
 
         all_products: list[dict] = []
         page = 1

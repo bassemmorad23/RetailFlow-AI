@@ -50,6 +50,11 @@ from fastapi.responses import JSONResponse
 from app.metrics import record_request, get_metrics
 from app.log_context import set_request_context, clear_request_context, get_request_context
 from fastapi.responses import RedirectResponse
+from app.settings.store_credentials import set_credentials
+from app.schemas.models import WooCommerceCredentialsRequest
+from app.ingestion.woocommerce_adapter import WooCommerceAdapter
+from app.settings.store_credentials import get_credentials
+
 
 
 
@@ -210,5 +215,85 @@ def upload_products(store_id: str, file: UploadFile = File(...)) -> IngestionRes
         "upload_updated": result.updated,
         "upload_failed": result.failed,
     },
+    )
+    return result
+
+
+
+@app.post("/stores/{store_id}/credentials/woocommerce")
+def save_woocommerce_credentials(
+    store_id: str,
+    creds: WooCommerceCredentialsRequest,
+) -> dict:
+    """
+    Save WooCommerce credentials for a store.
+    Validates HTTPS enforcement and required fields.
+    Overwrites any existing WC credentials for this store.
+    """
+    set_request_context(store_id=store_id)
+    logger.info("WC credentials save requested")
+
+    try:
+        set_credentials(
+            store_id,
+            "woocommerce",
+            creds.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Failed to save WC credentials")
+        raise HTTPException(status_code=500, detail="Failed to save credentials")
+
+    logger.info("WC credentials saved successfully")
+    return {"status": "saved", "store_id": store_id, "source": "woocommerce"}
+
+
+
+@app.post("/stores/{store_id}/sync/woocommerce", response_model=IngestionResult)
+def sync_woocommerce(store_id: str) -> IngestionResult:
+    """
+    Trigger a WooCommerce sync for this store.
+    Requires:
+      - Store has an industry configured (POST /stores/... first)
+      - WC credentials saved (POST /stores/.../credentials/woocommerce)
+    Returns ingestion summary (created / updated / failed).
+    """
+    set_request_context(store_id=store_id)
+    logger.info("WC sync triggered")
+
+    # Industry required
+    industry_id = get_industry(store_id)
+    if industry_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Store '{store_id}' has no industry set. Configure the industry first.",
+        )
+
+    # Credentials required
+    creds = get_credentials(store_id, "woocommerce")
+    if creds is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No WooCommerce credentials for store '{store_id}'. "
+                f"POST them to /stores/{store_id}/credentials/woocommerce first."
+            ),
+        )
+
+    try:
+        adapter = WooCommerceAdapter()
+        result = ingest_products(adapter, store_id, industry_id)
+    except Exception as exc:
+        logger.exception("WC sync failed")
+        raise HTTPException(status_code=500, detail=f"WC sync failed: {type(exc).__name__}: {exc}")
+
+    logger.info(
+        "WC sync complete",
+        extra={
+            "sync_created": result.created,
+            "sync_updated": result.updated,
+            "sync_failed": result.failed,
+        },
     )
     return result

@@ -867,3 +867,20 @@ class StoreSettings(BaseModel):
 
     class Config:
         extra = "forbid"
+        
+
+# ---------------------------------------------------------------------------
+# API request/response models
+# ---------------------------------------------------------------------------
+
+
+class WooCommerceCredentialsRequest(BaseModel):
+    """Merchant-submitted WooCommerce credentials for their store."""
+
+    site_url: str
+    auth_method: Literal["application_password", "consumer_key"]
+    username: str
+    password: str
+
+    class Config:
+        extra = "forbid"

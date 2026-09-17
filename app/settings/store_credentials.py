@@ -26,12 +26,56 @@ def _get_collection() -> Collection:
     db = client[settings.MONGO_DB]
     return db["store_credentials"]
 
+def _validate_woocommerce_creds(creds: dict[str, Any]) -> None:
+    """
+    Validate WooCommerce credentials structure and enforce HTTPS.
+    """
+    from urllib.parse import urlparse
+
+    # Required fields
+    required = {"site_url", "auth_method", "username", "password"}
+    missing = required - set(creds.keys())
+    if missing:
+        raise ValueError(
+            f"WooCommerce credentials missing required fields: {missing}. "
+            f"Required: site_url, auth_method, username, password."
+        )
+
+    # auth_method must be known value
+    valid_methods = {"application_password", "consumer_key"}
+    if creds["auth_method"] not in valid_methods:
+        raise ValueError(
+            f"auth_method must be one of {valid_methods}. "
+            f"Got: {creds['auth_method']}"
+        )
+
+    # HTTPS enforcement (localhost exception for dev)
+    url = creds["site_url"]
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    is_local = host in ("localhost", "127.0.0.1") or host.endswith(".local")
+
+    if parsed.scheme == "https":
+        return
+    if parsed.scheme == "http" and is_local:
+        return
+    raise ValueError(
+        f"WooCommerce site_url must use HTTPS in production. "
+        f"Got: {url}. HTTP sends credentials in plaintext and is only "
+        f"allowed for localhost/dev URLs."
+    )
+
+
 
 def set_credentials(store_id: str, source: str, creds: dict[str, Any]) -> None:
     """
     Save or update credentials for a store+source pair.
     Overwrites any existing credentials for that pair.
     """
+    
+    if source == "woocommerce":
+        _validate_woocommerce_creds(creds)
+    
     col = _get_collection()
     col.update_one(
         {"store_id": store_id, "source": source},

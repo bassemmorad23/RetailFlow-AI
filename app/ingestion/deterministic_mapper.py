@@ -30,6 +30,7 @@ _BUILTIN_ALIASES: dict[str, str] = {
     "desc": "description",
     "product description": "description",
     "product_description": "description",
+    "short_description": "description",
 
     # price
     "price": "price",
@@ -37,6 +38,7 @@ _BUILTIN_ALIASES: dict[str, str] = {
     "product price": "price",
     "product_price": "price",
     "unit price": "price",
+    "regular_price": "price",
 
     # currency
     "currency": "currency",
