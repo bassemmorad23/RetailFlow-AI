@@ -10,7 +10,7 @@ from unittest import result
 
 from pydantic import BaseModel, Field
 
-from app.ingestion.canonical_converter import to_canonical
+from app.ingestion.canonical_converter import to_canonical_grouped
 from app.ingestion.deterministic_mapper import map_columns
 from app.ingestion.source_adapter import SourceAdapter
 from app.products.product_store import _get_collection
@@ -60,27 +60,27 @@ def ingest_products(
     result.conflict_columns = mapping.conflicts
     
 
-    # 3. Convert + upsert
-    col = _get_collection()
-    for row in rows:
-        product = to_canonical(row, mapping, industry_id, store_id)
-        if product is None:
-            result.failed += 1
-            continue
+    
+    # 3. Group rows into Products (handling variants) then upsert
+    products = to_canonical_grouped(rows, mapping, industry_id, store_id)
+    
+    # Failed = rows that didn't produce any Product
+    # (e.g. missing product_id/name/price). Rough estimate.
+    result.failed = max(0, len(rows) - sum(max(len(p.variants), 1) for p in products))
 
-        # Upsert by (store_id, product_id)
+    col = _get_collection()
+    for product in products:
         doc = product.model_dump()
         write = col.update_one(
-            {"store_id": store_id, "product_id": product.product_id},
-            {"$set": doc},
+             {"store_id": store_id, "product_id": product.product_id},
+             {"$set": doc},
             upsert=True,
         )
+        
         if write.upserted_id is not None:
             result.created += 1
         elif write.matched_count > 0:
             result.updated += 1
-        else:
-            result.failed += 1
 
     logger.info(
     "Ingestion complete",

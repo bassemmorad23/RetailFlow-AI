@@ -156,6 +156,40 @@ class IntentResult(BaseModel):
     class Config:
         extra = "forbid"
 
+# ---------------------------------------------------------------------------
+# Product Variant Schema
+# ---------------------------------------------------------------------------
+class Variant(BaseModel):
+    """
+    A specific purchasable version of a Product.
+
+    Variants exist for products where the customer picks size, color,
+    storage, etc. Each variant has its own SKU, price, and stock status.
+    Attributes and specifications may differ per variant (e.g. iPhone
+    128GB vs 256GB have different storage_gb specs and different prices).
+
+    For products WITHOUT variants (single SKU, single price), the parent
+    Product's price/stock are used and variants is an empty list.
+    """
+
+    sku: str = Field(min_length=1, description="Unique identifier per variant.")
+    price: float = Field(ge=0, description="Variant's price. May differ from parent.")
+    stock_available: bool = Field(default=True, description="Whether variant is in stock.")
+    attributes: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Soft attributes like color, size — canonical field names.",
+    )
+    specifications: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Technical specs that differ per variant (e.g. storage_gb).",
+    )
+    image_url: str | None = Field(default=None, description="Variant-specific image.")
+
+    class Config:
+        extra = "forbid"
+
+
+
 
 # ---------------------------------------------------------------------------
 # Product + recommendation
@@ -252,6 +286,23 @@ class Product(BaseModel):
             "they originally sent."
         ),
     )
+    
+    
+    variants: list[Variant] = Field(
+        default_factory=list,
+        description=(
+            "Purchasable variations of this product. Empty for simple "
+            "products (single SKU). Non-empty for products where "
+            "customer picks size/color/storage — recommender filters "
+            "and returns specific variants."
+        ),
+    )
+    
+    
+    
+    
+    
+    
 
     # ---- Stock + media ----
 
