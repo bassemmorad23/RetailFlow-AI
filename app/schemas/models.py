@@ -312,31 +312,63 @@ class Product(BaseModel):
     class Config:
         extra = "forbid"
         
-        
+
 
 class ProductRecommendation(BaseModel):
-    """A single recommended product returned to the customer."""
-
+    """..."""
     product_id: str
     name: str
     price: float
-    reason: Optional[str] = None
+    reason: str
+
+    # NEW — populated when a specific variant matches
+    variant_sku: str | None = Field(
+        default=None,
+        description=(
+            "SKU of the matching variant, if this product has variants "
+            "and one specifically fits the customer's constraints. "
+            "None for simple products or when no specific variant fits."
+        ),
+    )
+    variant_attrs: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Attributes of the matching variant (e.g. {size: L, color: blue}). "
+            "Empty for simple products."
+        ),
+    )
 
     class Config:
         extra = "forbid"
-
-
+        
+        
+        
 class RetrievedChunk(BaseModel):
-    """A single chunk of store knowledge retrieved via RAG."""
+    """
+    A single result from RAG retrieval — a semantically relevant chunk
+    of content (product description, FAQ, policy) that may inform the
+    response or seed a product recommendation.
 
-    source: str
-    content: str
-    score: float
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    Kept lightweight — just enough for scoring and lookup. Full product
+    data is fetched separately via product_store when needed.
+    """
+
+    source: str = Field(
+        description=(
+            "Identifier of the source document/product. For products, "
+            "this is the product_id (used as the fetch key)."
+        ),
+    )
+    content: str = Field(description="The text content of the chunk.")
+    score: float = Field(
+        ge=0.0, le=1.0,
+        description="RAG similarity score (0.0 = irrelevant, 1.0 = perfect match).",
+    )
+    name: str | None = Field(default=None, description="Product name if this chunk is a product.")
+    price: float | None = Field(default=None, description="Product price if applicable.")
 
     class Config:
         extra = "forbid"
-
 
 # ---------------------------------------------------------------------------
 # Memory

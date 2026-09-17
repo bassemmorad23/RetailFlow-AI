@@ -1,12 +1,12 @@
 """
-Product recommendation with hard filtering and soft ranking.
+Product recommendation with hard filtering, soft ranking, and variant support.
 
 WHY THIS EXISTS:
 RAG returns semantically-relevant products. The recommender then:
   1. Fetches full Product data (needed for spec filtering)
   2. Applies HARD constraints (must-match — filters out products)
   3. Ranks by SOFT preferences (nice-to-have — influences order)
-  4. Returns top N
+  4. Returns top N with the best-matching variant (if applicable)
 
 WHY HARD vs SOFT SPLIT:
 Customer saying "must have 16GB RAM" is different from "prefer black".
@@ -16,6 +16,12 @@ Extraction step classifies each fact. Here we act on that classification.
 WHY LENIENT FALLBACK (Option Z):
 If hard filter removes everything, we return unfiltered candidates
 ranked by soft preferences. Better to show close matches than nothing.
+
+VARIANT SUPPORT:
+Products with variants (fashion size+color combos, phones with different
+storage options) get filtered/ranked at the VARIANT level. The returned
+ProductRecommendation carries both the parent product info AND the specific
+matching variant's SKU + attrs. Simple products (no variants) work as before.
 """
 
 from typing import Any
@@ -42,7 +48,6 @@ _RECOMMENDATION_INTENTS = {
 }
 
 _MIN_SCORE_THRESHOLD = 0.35
-_PRODUCT_SOURCE_PREFIX = ""  # legacy field, no longer required
 _MAX_RECOMMENDATIONS = 3
 
 
@@ -62,7 +67,7 @@ def recommend_products(
     if not retrieved_context:
         return []
 
-    # Get candidate product_ids from RAG chunks (skip non-product chunks)
+    # Get candidate product_ids from RAG chunks (skip low-relevance)
     candidate_ids = [
         chunk.source
         for chunk in retrieved_context
@@ -82,7 +87,7 @@ def recommend_products(
     hard = facts.hard_constraints or {}
     soft = facts.soft_preferences or {}
 
-    # Apply hard filter
+    # Apply hard filter (at variant level for variant products)
     filtered = [p for p in products if _matches_hard(p, hard, industry_id)]
 
     # Lenient fallback: if nothing passes hard filter, use all candidates
@@ -98,41 +103,78 @@ def recommend_products(
 
     # Build recommendations from top N
     return [
-        _to_recommendation(p, facts) for p in ranked[:_MAX_RECOMMENDATIONS]
+        _to_recommendation(p, facts, industry_id)
+        for p in ranked[:_MAX_RECOMMENDATIONS]
     ]
 
 
 # ---------------------------------------------------------------------------
-# Hard filter
+# Hard filter — variant-aware
 # ---------------------------------------------------------------------------
 
 def _matches_hard(
     product: Product, constraints: dict[str, Any], industry_id: str | None
 ) -> bool:
-    """Product must satisfy ALL hard constraints."""
+    """
+    Product-level hard filter. For products WITH variants, we check
+    if ANY variant satisfies constraints (parent qualifies if any child does).
+    Simple products check parent attrs only.
+    """
     if not constraints:
         return True
     if industry_id is None:
         return True
 
+    # If product has variants, at least one must match all hard constraints
+    if product.variants:
+        return any(
+            _matches_hard_variant(product, v, constraints, industry_id)
+            for v in product.variants
+        )
+
+    # Simple product — check parent attrs/specs directly
+    return _check_constraints_against(
+        constraints,
+        {**product.attributes, **product.specifications},
+        industry_id,
+    )
+
+
+def _matches_hard_variant(
+    product: Product, variant, constraints: dict[str, Any], industry_id: str
+) -> bool:
+    """Check if a specific variant (with parent's shared attrs) matches constraints."""
+    # Merge parent + variant attrs/specs — variant overrides parent
+    merged = {
+        **product.attributes,
+        **product.specifications,
+        **variant.attributes,
+        **variant.specifications,
+    }
+    return _check_constraints_against(constraints, merged, industry_id)
+
+
+def _check_constraints_against(
+    constraints: dict[str, Any],
+    values: dict[str, Any],
+    industry_id: str,
+) -> bool:
+    """Apply each hard constraint against a values dict."""
     for canonical_name, required_value in constraints.items():
-        product_value = _get_product_value(product, canonical_name)
+        product_value = values.get(canonical_name)
         if product_value is None:
             return False
-
         try:
             field = get_field(industry_id, canonical_name)
         except KeyError:
             continue  # unknown field — ignore constraint
-
         if not _compare(product_value, required_value, field.comparison_operator):
             return False
-
     return True
 
 
 def _compare(product_value: Any, required: Any, operator: str) -> bool:
-    """Apply the field's comparison operator."""
+    """Apply the field's comparison operator to a value against a required value."""
     try:
         if operator == "==":
             return str(product_value).strip().lower() == str(required).strip().lower()
@@ -150,58 +192,105 @@ def _compare(product_value: Any, required: Any, operator: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Soft ranking
+# Soft ranking — variant-aware
 # ---------------------------------------------------------------------------
 
 def _score_soft(
     product: Product, preferences: dict[str, Any], industry_id: str | None
 ) -> int:
-    """+1 point per soft preference the product matches."""
+    """Product-level soft score. For variants, use best variant's score."""
     if not preferences or industry_id is None:
         return 0
+    if product.variants:
+        return max(
+            _score_soft_variant(product, v, preferences, industry_id)
+            for v in product.variants
+        )
+    return _score_values(
+        preferences,
+        {**product.attributes, **product.specifications},
+        industry_id,
+    )
 
+
+def _score_soft_variant(
+    product: Product, variant, preferences: dict[str, Any], industry_id: str
+) -> int:
+    """Score a specific variant against soft preferences."""
+    merged = {
+        **product.attributes,
+        **product.specifications,
+        **variant.attributes,
+        **variant.specifications,
+    }
+    return _score_values(preferences, merged, industry_id)
+
+
+def _score_values(
+    preferences: dict[str, Any],
+    values: dict[str, Any],
+    industry_id: str,
+) -> int:
+    """+1 point per soft preference the values dict matches."""
     score = 0
     for canonical_name, preferred_value in preferences.items():
-        product_value = _get_product_value(product, canonical_name)
+        product_value = values.get(canonical_name)
         if product_value is None:
             continue
-
         try:
             field = get_field(industry_id, canonical_name)
         except KeyError:
             continue
-
         if _compare(product_value, preferred_value, field.comparison_operator):
             score += 1
-
     return score
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Recommendation builder
 # ---------------------------------------------------------------------------
 
-def _get_product_value(product: Product, canonical_name: str) -> Any:
-    """Look up a value in specifications or attributes."""
-    if canonical_name in product.specifications:
-        return product.specifications[canonical_name]
-    if canonical_name in product.attributes:
-        return product.attributes[canonical_name]
-    return None
+def _to_recommendation(
+    product: Product,
+    facts: KnownFacts,
+    industry_id: str | None,
+) -> ProductRecommendation:
+    """
+    Build recommendation. For variant products, pick the best-matching
+    variant and include its SKU + attrs.
+    """
+    hard = facts.hard_constraints or {}
+    soft = facts.soft_preferences or {}
 
+    best_variant = None
+    best_variant_price = product.price
 
-def _to_recommendation(product: Product, facts: KnownFacts) -> ProductRecommendation:
+    if product.variants and industry_id is not None:
+        # Pick the variant that matches hard constraints AND has highest soft score
+        matching = [
+            v for v in product.variants
+            if _matches_hard_variant(product, v, hard, industry_id)
+        ]
+        candidates = matching if matching else product.variants
+
+        best_variant = max(
+            candidates,
+            key=lambda v: _score_soft_variant(product, v, soft, industry_id),
+        )
+        best_variant_price = best_variant.price
+
     reason_parts = ["Matches your criteria."]
-
-    # Show any hard constraint matches
-    for key in facts.hard_constraints:
-        value = _get_product_value(product, key)
-        if value is not None:
-            reason_parts.append(f"{key}: {value}.")
+    for key in hard:
+        if best_variant and key in best_variant.attributes:
+            reason_parts.append(f"{key}: {best_variant.attributes[key]}.")
+        elif key in product.attributes:
+            reason_parts.append(f"{key}: {product.attributes[key]}.")
 
     return ProductRecommendation(
         product_id=product.product_id,
         name=product.name,
-        price=product.price,
+        price=best_variant_price,
         reason=" ".join(reason_parts),
+        variant_sku=best_variant.sku if best_variant else None,
+        variant_attrs=dict(best_variant.attributes) if best_variant else {},
     )
