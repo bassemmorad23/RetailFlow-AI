@@ -61,7 +61,7 @@ _BUILTIN_ALIASES: dict[str, str] = {
     "id": "product_id",
     "product id": "product_id",
     "product_id": "product_id",
-    "sku": "product_id",
+    
 }
 
 
