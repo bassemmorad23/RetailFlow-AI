@@ -62,6 +62,13 @@ _BUILTIN_ALIASES: dict[str, str] = {
     "product id": "product_id",
     "product_id": "product_id",
     
+    
+    # category
+    "category": "category",
+    "product_type": "category",
+    "product type": "category",
+    "type": "category",
+    
 }
 
 

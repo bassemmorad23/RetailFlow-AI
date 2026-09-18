@@ -61,6 +61,7 @@ from app.oauth.shopify_oauth import (
     verify_hmac,
     exchange_code_for_token,
 )
+from app.ingestion.shopify_adapter import ShopifyAdapter
 
 
 
@@ -367,3 +368,52 @@ def shopify_callback(request: Request) -> dict:
 
     logger.info("Shopify OAuth completed", extra={"oauth_shop": shop})
     return {"status": "installed", "shop": shop, "store_id": store_id}
+
+
+@app.post("/stores/{store_id}/sync/shopify", response_model=IngestionResult)
+def sync_shopify(store_id: str) -> IngestionResult:
+    """
+    Trigger Shopify sync for a store.
+    Requires:
+      - Store has industry set
+      - Shopify OAuth completed (credentials in store_credentials)
+    """
+    set_request_context(store_id=store_id)
+    logger.info("Shopify sync triggered")
+
+    industry_id = get_industry(store_id)
+    if industry_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Store '{store_id}' has no industry set.",
+        )
+
+    creds = get_credentials(store_id, "shopify")
+    if creds is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No Shopify credentials for '{store_id}'. "
+                f"Complete OAuth first via /oauth/shopify/install."
+            ),
+        )
+
+    try:
+        adapter = ShopifyAdapter()
+        result = ingest_products(adapter, store_id, industry_id)
+    except Exception as exc:
+        logger.exception("Shopify sync failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Shopify sync failed: {type(exc).__name__}: {exc}",
+        )
+
+    logger.info(
+        "Shopify sync complete",
+        extra={
+            "sync_created": result.created,
+            "sync_updated": result.updated,
+            "sync_failed": result.failed,
+        },
+    )
+    return result
