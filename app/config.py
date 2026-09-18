@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     QDRANT_URL: str
     QDRANT_API_KEY: str
     SENTRY_DSN: str = ""
+    SHOPIFY_CLIENT_ID: str = ""
+    SHOPIFY_CLIENT_SECRET: str = ""
+    SHOPIFY_REDIRECT_BASE_URL: str = "https://console-audacity-snort.ngrok-free.dev"
     
     response_model_chain: list[str] = [
     "openrouter/free"

@@ -54,7 +54,13 @@ from app.settings.store_credentials import set_credentials
 from app.schemas.models import WooCommerceCredentialsRequest
 from app.ingestion.woocommerce_adapter import WooCommerceAdapter
 from app.settings.store_credentials import get_credentials
-
+from fastapi.responses import RedirectResponse
+from app.oauth.shopify_oauth import (
+    build_authorize_url,
+    verify_state,
+    verify_hmac,
+    exchange_code_for_token,
+)
 
 
 
@@ -297,3 +303,67 @@ def sync_woocommerce(store_id: str) -> IngestionResult:
         },
     )
     return result
+
+
+@app.get("/oauth/shopify/install")
+def shopify_install(shop: str, store_id: str) -> RedirectResponse:
+    """
+    Start Shopify OAuth. Merchant clicks 'Connect Shopify' on our site,
+    passing their shop domain. We redirect them to Shopify authorize.
+    """
+    set_request_context(store_id=store_id)
+    logger.info("Shopify install initiated", extra={"shop": shop})
+
+    if not shop.endswith(".myshopify.com"):
+        raise HTTPException(status_code=400, detail="Invalid shop domain")
+
+    url = build_authorize_url(shop, store_id)
+    return RedirectResponse(url=url)
+
+
+
+
+@app.get("/oauth/shopify/callback")
+def shopify_callback(request: Request) -> dict:
+    """..."""
+    # Extract ALL query params (Shopify signs the complete set)
+    params = dict(request.query_params)
+
+    code = params.get("code")
+    shop = params.get("shop")
+    state = params.get("state")
+    hmac_value = params.pop("hmac", "")  # remove hmac from dict for verification
+
+    if not (code and shop and state and hmac_value):
+        raise HTTPException(status_code=400, detail="Missing required params")
+
+    # 1. Verify state (CSRF protection)
+    state_data = verify_state(state)
+    if state_data is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired state")
+
+    store_id = state_data["store_id"]
+    set_request_context(store_id=store_id)
+
+    if state_data["shop"] != shop:
+        raise HTTPException(status_code=400, detail="Shop mismatch")
+
+    # 2. Verify HMAC against ALL params (except hmac itself, already popped)
+    if not verify_hmac(params, hmac_value):
+        raise HTTPException(status_code=400, detail="Invalid HMAC")
+
+    # 3. Exchange code for permanent access token
+    try:
+        access_token = exchange_code_for_token(shop, code)
+    except Exception as exc:
+        logger.exception("Token exchange failed")
+        raise HTTPException(status_code=500, detail=f"Token exchange failed: {exc}")
+
+    # 4. Save credentials
+    set_credentials(store_id, "shopify", {
+        "shop": shop,
+        "access_token": access_token,
+    })
+
+    logger.info("Shopify OAuth completed", extra={"oauth_shop": shop})
+    return {"status": "installed", "shop": shop, "store_id": store_id}
