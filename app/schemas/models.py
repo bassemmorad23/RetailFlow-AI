@@ -31,6 +31,7 @@ class IntentLabel(str, Enum):
     WANTS_RECOMMENDATION = "wants_recommendation"
     READY_TO_BUY = "ready_to_buy"
     COMPLAINT = "complaint"
+    COMPARE_PRODUCTS = "compare_products"
     OTHER = "other"
 
 
@@ -341,6 +342,64 @@ class ProductRecommendation(BaseModel):
     class Config:
         extra = "forbid"
         
+        
+        
+class ComparisonRow(BaseModel):
+    """
+    One row in a comparison — one field across all products being compared.
+
+    Values dict maps product_id to that product's value for this field.
+    A None value means the product doesn't have this field defined
+    (never invented — always shown as unavailable in the response).
+    """
+
+    field_name: str = Field(description="Canonical field name (e.g. 'ram_gb', 'color').")
+    display_name: str = Field(description="Human-readable name for the field.")
+    values: dict[str, Any] = Field(
+        default_factory=dict,
+        description="{product_id: value or None}. None = field not present on that product.",
+    )
+
+    class Config:
+        extra = "forbid"
+
+
+class ComparisonResult(BaseModel):
+    """
+    Structured comparison of 2-3 products from the same store.
+
+    Enforces:
+    - 2-3 products maximum
+    - All products from the same store (verified at build time)
+    - not_found tracks mentions that didn't match catalog
+    - alternatives suggests replacement products from same store
+
+    Response generator receives this and produces natural-language output.
+    Never sees fabricated data — missing values are None.
+    """
+
+    products: list[Product] = Field(
+        description="Found products being compared (2-3, from same store).",
+    )
+    rows: list[ComparisonRow] = Field(
+        default_factory=list,
+        description="One row per comparison field, in industry-preferred order.",
+    )
+    not_found: list[str] = Field(
+        default_factory=list,
+        description="Product mentions from customer that didn't match anything in catalog.",
+    )
+    alternatives: list[Product] = Field(
+        default_factory=list,
+        description="Suggested alternatives from same store for not-found products.",
+    )
+
+    class Config:
+        extra = "forbid"
+
+
+
+
         
         
 class RetrievedChunk(BaseModel):

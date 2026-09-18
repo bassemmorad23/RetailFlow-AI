@@ -16,6 +16,8 @@ _CANDIDATE_LABEL_TO_ENUM = {
     "The customer is reporting a problem, dissatisfaction, delay, damage, or other complaint.": IntentLabel.COMPLAINT,
 
     "The customer has decided to purchase a product or wants to place or confirm an order.": IntentLabel.READY_TO_BUY,
+    
+    "The customer wants to compare two or more specific products to see the differences between them.": IntentLabel.COMPARE_PRODUCTS,
 
     "The customer is asking something that does not fit the other shopping intents.": IntentLabel.OTHER,
 }
