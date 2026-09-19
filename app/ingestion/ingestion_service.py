@@ -14,6 +14,8 @@ from app.ingestion.canonical_converter import to_canonical_grouped
 from app.ingestion.deterministic_mapper import map_columns
 from app.ingestion.source_adapter import SourceAdapter
 from app.products.product_store import _get_collection
+from app.rag.indexer import sync_products_to_qdrant
+from app.ingestion.ai_column_mapper import ai_map_columns
 
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,27 @@ def ingest_products(
     result.unmapped_columns = mapping.unmapped
     result.conflict_columns = mapping.conflicts
     
+    # AI-assisted mapping: try to resolve unmapped columns via LLM
+    if mapping.unmapped and industry_id is not None:
+        ai_mappings = ai_map_columns(mapping.unmapped, rows, industry_id)
+        if ai_mappings:
+            builtin_targets = {"product_id", "name", "description", "price", "category", "image_url"}
+            # Add AI-resolved mappings into the existing mapping
+            for src, tgt in ai_mappings.items():
+                if tgt in builtin_targets:
+                    mapping.builtin[src] = tgt
+                else:
+                    mapping.mapped[src] = tgt
+                    
+            # Remove AI-resolved columns from the unmapped list
+            mapping.unmapped = [c for c in mapping.unmapped if c not in ai_mappings]
+            result.unmapped_columns = mapping.unmapped
+            logger.info(
+                "AI mapping resolved %d additional columns",
+                len(ai_mappings),
+                extra={"ai_mapped_columns": list(ai_mappings.keys())},
+            )
+    
 
     
     # 3. Group rows into Products (handling variants) then upsert
@@ -81,7 +104,20 @@ def ingest_products(
             result.created += 1
         elif write.matched_count > 0:
             result.updated += 1
-
+    
+    
+    # Sync to Qdrant — RAG must reflect the catalog
+    qdrant_result = sync_products_to_qdrant(store_id, products)
+    logger.info(
+        "Qdrant sync during ingestion",
+        extra={
+            "qdrant_upserted": qdrant_result["upserted"],
+            "qdrant_deleted": qdrant_result["deleted"],
+        },
+    )
+    
+    
+      
     logger.info(
     "Ingestion complete",
     extra={

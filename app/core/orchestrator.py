@@ -55,6 +55,8 @@ from app.rag.retriever import retrieve_context
 from app.recommendation.product_recommender import recommend_products
 from app.response.response_generator import generate_response
 from app.analytics.conversation_logger import log_turn
+from app.comparison.comparison_service import compare_products
+from app.schemas.models import ComparisonResult
 
 from app.schemas.models import (
     AgentReply,
@@ -186,6 +188,21 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         [],
     )
     
+    # Comparison flow: intercept COMPARE_PRODUCTS intent (confidence-gated)
+    # to prevent BART false positives from hijacking the response.
+    comparison: ComparisonResult | None = None
+    if intent.label == IntentLabel.COMPARE_PRODUCTS and intent.confidence >= 0.5:
+        comparison = _time_step(
+            "comparison",
+            lambda: compare_products(
+                message_text=message.text,
+                store_id=message.store_id,
+                industry_id=industry_id,
+                memory=memory,
+            ),
+            None,
+        )
+    
     
     reply_text = _time_step(
         "response_generation",
@@ -197,6 +214,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             retrieved_context=retrieved_context,
             recommendations=recommendations,
             industry_id=industry_id,
+            comparison=comparison,
         ),
         "Sorry, I could not process your message.",
     )

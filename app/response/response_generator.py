@@ -83,6 +83,7 @@ from app.schemas.models import (
     MemoryState,
     ProductRecommendation,
     RetrievedChunk,
+    ComparisonResult,
 )
 
 
@@ -194,6 +195,7 @@ def generate_response(
     retrieved_context: Iterable[RetrievedChunk],
     recommendations: Iterable[ProductRecommendation],
     industry_id: str | None,
+    comparison: "ComparisonResult | None" = None,
 ) -> str:
     """
     Build the prompt and call the model chain in order. The first model
@@ -201,14 +203,19 @@ def generate_response(
     string so the orchestrator always has a reply to give the customer.
     """
     system_prompt = _build_system_prompt(industry_id)
-    prompt = _build_user_prompt(
-        message=message,
-        emotion=emotion,
-        intent=intent,
-        memory=memory,
-        retrieved_context=retrieved_context,
-        recommendations=recommendations,
-    )
+    
+    if comparison is not None and comparison.products:
+        prompt = _build_comparison_prompt(message=message, comparison=comparison)
+        
+    else:
+        prompt = _build_user_prompt(
+            message=message,
+            emotion=emotion,
+            intent=intent,
+            memory=memory,
+            retrieved_context=retrieved_context,
+            recommendations=recommendations,
+        )
 
     for model in settings.response_model_chain:
         started = time.monotonic()
@@ -371,3 +378,62 @@ def _format_known_facts(facts: KnownFacts) -> str:
         parts.append("interested in: " + ", ".join(facts.mentioned_products))
 
     return ", ".join(parts)
+
+
+def _build_comparison_prompt(
+    message: CustomerMessage,
+    comparison: ComparisonResult,
+) -> str:
+    """
+    Build a user prompt for the COMPARE_PRODUCTS intent.
+
+    The comparison table is presented as the ONLY source of truth.
+    LLM is told explicitly: use only these facts, never invent specs,
+    show missing values as unavailable. Not-found products and
+    alternatives are surfaced so the LLM mentions them naturally.
+    """
+    lines: list[str] = []
+
+    lines.append("The customer wants to compare products. Use ONLY the facts below.")
+    lines.append("Do NOT invent specifications, prices, or any product details.")
+    lines.append("If a field is missing (shown as 'unavailable'), say so honestly.\n")
+
+    # The comparison table
+    lines.append("=== COMPARISON TABLE ===")
+    product_names = {p.product_id: p.name for p in comparison.products}
+    lines.append("Products: " + ", ".join(product_names.values()))
+    lines.append("")
+
+    for row in comparison.rows:
+        lines.append(f"{row.display_name}:")
+        for pid, val in row.values.items():
+            display_val = val if val is not None else "unavailable"
+            lines.append(f"  - {product_names.get(pid, pid)}: {display_val}")
+        lines.append("")
+
+    # Not-found products
+    if comparison.not_found:
+        lines.append("=== PRODUCTS NOT IN CATALOG ===")
+        lines.append(
+            "The customer also mentioned these, but they are NOT in our catalog. "
+            "Tell them clearly. Never invent details about them."
+        )
+        for name in comparison.not_found:
+            lines.append(f"  - {name}")
+        lines.append("")
+
+    # Alternatives for not-found
+    if comparison.alternatives:
+        lines.append("=== SUGGESTED ALTERNATIVES ===")
+        lines.append(
+            "For products not in our catalog, these similar options are available. "
+            "Mention them briefly as alternatives."
+        )
+        for alt in comparison.alternatives:
+            lines.append(f"  - {alt.name} (price: {alt.price})")
+        lines.append("")
+
+    lines.append(f"<customer_message>\n{message.text}\n</customer_message>")
+    lines.append("\nYour reply — present the comparison naturally and helpfully:")
+
+    return "\n".join(lines)

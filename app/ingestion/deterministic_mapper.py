@@ -10,8 +10,8 @@ for columns this can't resolve.
 """
 
 from pydantic import BaseModel, Field
-
 from app.industries.registry import get_fields_for_industry
+
 
 
 # Built-in Product fields — always present, not industry-scoped.
