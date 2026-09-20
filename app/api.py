@@ -532,6 +532,7 @@ async def instagram_webhook_receive(request: Request) -> dict:
 
 def _process_instagram_entry(entry: dict) -> None:
     """Route inbound DMs through orchestrator, send reply back."""
+    logger.info("Raw IG entry", extra={"raw_entry": entry})
     from app.core.orchestrator import handle_message
     from app.schemas.models import CustomerMessage
     from app.settings.store_credentials import find_store_by_ig_account
