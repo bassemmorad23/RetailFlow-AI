@@ -62,7 +62,13 @@ from app.oauth.shopify_oauth import (
     exchange_code_for_token,
 )
 from app.ingestion.shopify_adapter import ShopifyAdapter
-
+from app.oauth.instagram_oauth import (
+    build_authorize_url as ig_build_authorize_url,
+    exchange_code_for_token as ig_exchange_code,
+    exchange_for_long_lived_token as ig_exchange_long,
+    get_account_info as ig_get_account_info,
+)
+from fastapi.responses import PlainTextResponse
 
 
 
@@ -417,3 +423,145 @@ def sync_shopify(store_id: str) -> IngestionResult:
         },
     )
     return result
+
+
+
+@app.get("/instagram/install")
+def instagram_install(store_id: str) -> RedirectResponse:
+    """Start Instagram OAuth. Merchant clicks 'Connect Instagram' on our site."""
+    set_request_context(store_id=store_id)
+    logger.info("Instagram install initiated")
+    url = ig_build_authorize_url(store_id)
+    return RedirectResponse(url=url)
+
+
+@app.get("/instagram/callback")
+def instagram_callback(code: str = "", state: str = "", error: str = "") -> dict:
+    """
+    Meta redirects here after merchant approves.
+    Exchange code → long-lived token → save to store_credentials.
+    """
+    if error:
+        raise HTTPException(status_code=400, detail=f"Instagram OAuth error: {error}")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state")
+
+    store_id = state
+    set_request_context(store_id=store_id)
+
+    try:
+        # 1. Short-lived token
+        short_result = ig_exchange_code(code)
+        short_token = short_result["access_token"]
+
+        # 2. Long-lived token (60 days)
+        long_result = ig_exchange_for_long_lived_token = ig_exchange_long(short_token)
+        long_token = long_result["access_token"]
+
+        # 3. Account info
+        info = ig_get_account_info(long_token)
+
+    except Exception as exc:
+        logger.exception("Instagram OAuth failed")
+        raise HTTPException(status_code=500, detail=f"OAuth failed: {exc}")
+
+    # 4. Save
+    set_credentials(store_id, "instagram", {
+        "access_token": long_token,
+        "instagram_business_account_id": info["id"],
+        "username": info.get("username", ""),
+    })
+
+    logger.info("Instagram OAuth completed", extra={"ig_username": info.get("username")})
+    return {
+        "status": "installed",
+        "store_id": store_id,
+        "instagram_username": info.get("username"),
+    }
+    
+    
+@app.get("/instagram/webhook")
+def instagram_webhook_verify(
+    request: Request,
+) -> PlainTextResponse:
+    """
+    Meta's webhook verification handshake.
+    Meta sends GET with hub.mode, hub.verify_token, hub.challenge.
+    We echo the challenge back if verify_token matches ours.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    params = dict(request.query_params)
+    mode = params.get("hub.mode")
+    token = params.get("hub.verify_token")
+    challenge = params.get("hub.challenge", "")
+
+    if mode == "subscribe" and token == settings.INSTAGRAM_WEBHOOK_VERIFY_TOKEN:
+        logger.info("Instagram webhook verified")
+        return PlainTextResponse(content=challenge, status_code=200)
+
+    logger.warning("Instagram webhook verification failed", extra={
+        "webhook_mode": mode,
+        "token_match": token == settings.INSTAGRAM_WEBHOOK_VERIFY_TOKEN,
+    })
+    raise HTTPException(status_code=403, detail="Verification failed")
+
+
+@app.post("/instagram/webhook")
+async def instagram_webhook_receive(request: Request) -> dict:
+    """
+    Meta sends real events here (DMs, comments).
+    We acknowledge quickly (200), process asynchronously later.
+    """
+    payload = await request.json()
+    logger.info("Instagram webhook event received", extra={
+        "webhook_payload_keys": list(payload.keys()) if isinstance(payload, dict) else None,
+    })
+
+    # Process each entry (Meta batches multiple events per webhook call)
+    entries = payload.get("entry", []) if isinstance(payload, dict) else []
+    for entry in entries:
+        try:
+            _process_instagram_entry(entry)
+        except Exception:
+            logger.exception("Failed to process IG entry")
+            # Don't fail webhook — Meta will retry if we return non-200
+
+    return {"status": "ok"}
+
+
+def _process_instagram_entry(entry: dict) -> None:
+    """Route inbound DMs through orchestrator, send reply back."""
+    from app.core.orchestrator import handle_message
+    from app.schemas.models import CustomerMessage
+    from app.settings.store_credentials import find_store_by_ig_account
+    from app.channels.instagram_channel import send_dm
+
+    messaging = entry.get("messaging", [])
+    for event in messaging:
+        message = event.get("message")
+        if not message or message.get("is_echo"):
+            continue
+
+        text = message.get("text")
+        sender_id = event.get("sender", {}).get("id")
+        recipient_id = event.get("recipient", {}).get("id")
+
+        if not (text and sender_id and recipient_id):
+            continue
+
+        # Which store owns this IG account?
+        store_id = find_store_by_ig_account(recipient_id)
+        if store_id is None:
+            logger.warning("No store for IG account", extra={"ig_recipient": recipient_id})
+            continue
+
+        # Run pipeline
+        reply = handle_message(CustomerMessage(
+            store_id=store_id,
+            conversation_id=f"ig_{sender_id}",  # one convo per customer
+            text=text,
+        ))
+
+        # Send reply back to customer
+        send_dm(store_id, sender_id, reply.reply_text)

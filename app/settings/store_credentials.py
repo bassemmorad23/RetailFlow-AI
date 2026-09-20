@@ -93,3 +93,12 @@ def get_credentials(store_id: str, source: str) -> dict[str, Any] | None:
     if doc is None:
         return None
     return doc.get("credentials")
+
+def find_store_by_ig_account(ig_business_account_id: str) -> str | None:
+    """Find which store owns a given Instagram Business account."""
+    col = _get_collection()
+    doc = col.find_one({
+        "source": "instagram",
+        "credentials.instagram_business_account_id": ig_business_account_id,
+    })
+    return doc["store_id"] if doc else None
