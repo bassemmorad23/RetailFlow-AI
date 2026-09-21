@@ -69,6 +69,11 @@ from app.oauth.instagram_oauth import (
     get_account_info as ig_get_account_info,
 )
 from fastapi.responses import PlainTextResponse
+from app.oauth.messenger_oauth import (
+    build_authorize_url as msg_build_authorize_url,
+    exchange_code_for_user_token as msg_exchange_code,
+    get_user_pages as msg_get_pages,
+)
 
 
 
@@ -566,3 +571,65 @@ def _process_instagram_entry(entry: dict) -> None:
 
         # Send reply back to customer
         send_dm(store_id, sender_id, reply.reply_text)
+        
+        
+        
+        
+@app.get("/messenger/webhook")
+def messenger_webhook_verify(request: Request) -> PlainTextResponse:
+    """Meta webhook verification for Messenger."""
+    params = dict(request.query_params)
+    if (
+        params.get("hub.mode") == "subscribe"
+        and params.get("hub.verify_token") == settings.META_WEBHOOK_VERIFY_TOKEN
+    ):
+        logger.info("Messenger webhook verified")
+        return PlainTextResponse(content=params.get("hub.challenge", ""), status_code=200)
+    raise HTTPException(status_code=403, detail="Verification failed")
+
+
+@app.post("/messenger/webhook")
+async def messenger_webhook_receive(request: Request) -> dict:
+    """Messenger event receiver."""
+    payload = await request.json()
+    logger.info("Messenger webhook event", extra={"raw_payload": payload})
+    # TODO: process entries in Task 5
+    return {"status": "ok"}
+
+
+@app.get("/messenger/install")
+def messenger_install(store_id: str) -> RedirectResponse:
+    set_request_context(store_id=store_id)
+    return RedirectResponse(url=msg_build_authorize_url(store_id))
+
+
+@app.get("/messenger/callback")
+def messenger_callback(code: str = "", state: str = "", error: str = "") -> dict:
+    if error:
+        raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code/state")
+
+    store_id = state
+    set_request_context(store_id=store_id)
+
+    try:
+        user_token = msg_exchange_code(code)
+        pages = msg_get_pages(user_token)
+    except Exception as exc:
+        logger.exception("Messenger OAuth failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    if not pages:
+        raise HTTPException(status_code=400, detail="No Pages found for this user")
+
+    # For now: use the first page. Later: let merchant pick if multiple.
+    page = pages[0]
+    set_credentials(store_id, "messenger", {
+        "page_id": page["id"],
+        "page_name": page["name"],
+        "page_access_token": page["access_token"],
+    })
+
+    logger.info("Messenger OAuth completed", extra={"page_name": page["name"]})
+    return {"status": "installed", "store_id": store_id, "page_name": page["name"]}
