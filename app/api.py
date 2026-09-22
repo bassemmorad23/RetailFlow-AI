@@ -591,9 +591,38 @@ def messenger_webhook_verify(request: Request) -> PlainTextResponse:
 @app.post("/messenger/webhook")
 async def messenger_webhook_receive(request: Request) -> dict:
     """Messenger event receiver."""
+    from app.core.orchestrator import handle_message
+    from app.schemas.models import CustomerMessage
+    from app.settings.store_credentials import find_store_by_fb_page
+    from app.channels.messenger_channel import send_message
+
     payload = await request.json()
     logger.info("Messenger webhook event", extra={"raw_payload": payload})
-    # TODO: process entries in Task 5
+
+    entries = payload.get("entry", []) if isinstance(payload, dict) else []
+    for entry in entries:
+        page_id = entry.get("id")
+        store_id = find_store_by_fb_page(page_id) if page_id else None
+        if not store_id:
+            logger.warning("No store for Page", extra={"fb_page": page_id})
+            continue
+
+        for event in entry.get("messaging", []):
+            message = event.get("message")
+            if not message or message.get("is_echo"):
+                continue
+            text = message.get("text")
+            sender_id = event.get("sender", {}).get("id")
+            if not (text and sender_id):
+                continue
+
+            reply = handle_message(CustomerMessage(
+                store_id=store_id,
+                conversation_id=f"fb_{sender_id}",
+                text=text,
+            ))
+            send_message(store_id, sender_id, reply.reply_text)
+
     return {"status": "ok"}
 
 

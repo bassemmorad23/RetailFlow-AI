@@ -102,3 +102,13 @@ def find_store_by_ig_account(ig_business_account_id: str) -> str | None:
         "credentials.instagram_business_account_id": ig_business_account_id,
     })
     return doc["store_id"] if doc else None
+
+
+def find_store_by_fb_page(page_id: str) -> str | None:
+    """Find store that owns a given Facebook Page."""
+    col = _get_collection()
+    doc = col.find_one({
+        "source": "messenger",
+        "credentials.page_id": page_id,
+    })
+    return doc["store_id"] if doc else None
