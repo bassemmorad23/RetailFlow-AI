@@ -10,6 +10,7 @@ from app.auth import repository as repo
 from app.auth.dependencies import get_current_user_id
 from app.auth.passwords import hash_password, needs_rehash, verify_password
 from app.config import settings
+from app.auth import login_limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -72,12 +73,26 @@ def register(body: RegisterRequest, response: Response) -> dict:
 
 
 @router.post("/login")
-def login(body: LoginRequest, response: Response) -> dict:
+def login(body: LoginRequest, request: Request, response: Response) -> dict:
+    ip = request.client.host if request.client else "unknown"
+
+    retry = login_limiter.retry_after_seconds(body.email, ip)
+    if retry is not None:
+        logger.warning("Login rate limited")
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+            headers={"Retry-After": str(retry)},
+        )
+
     user = repo.get_user_by_email(body.email)
     stored_hash = user["password_hash"] if user else _DUMMY_HASH
     if not verify_password(stored_hash, body.password) or user is None:
+        login_limiter.record_failure(body.email, ip)
         logger.info("Login failed")
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    login_limiter.clear_email(body.email)
 
     if needs_rehash(user["password_hash"]):
         repo.update_password_hash(user["user_id"], hash_password(body.password))
@@ -85,6 +100,7 @@ def login(body: LoginRequest, response: Response) -> dict:
     _set_session_cookie(response, repo.create_session(user["user_id"]))
     logger.info("Login succeeded", extra={"auth_user_id": user["user_id"]})
     return {"user": _public_user(user), "stores": repo.list_user_stores(user["user_id"])}
+
 
 
 @router.post("/logout", status_code=204)

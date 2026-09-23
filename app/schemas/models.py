@@ -72,7 +72,7 @@ def _reject_blank_identifiers(value: str, field_name: str) -> str:
 
 
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-
+MAX_MESSAGE_LENGTH = 2000
 
 def _clean_customer_text(value: str) -> str:
     """
@@ -93,8 +93,8 @@ def _clean_customer_text(value: str) -> str:
 
     # Hard cap: 2000 chars is well beyond any legitimate chat message
     # and protects us from paste-bombs.
-    if len(cleaned) > 2000:
-        cleaned = cleaned[:2000]
+    if len(cleaned) > MAX_MESSAGE_LENGTH:
+        cleaned = cleaned[:MAX_MESSAGE_LENGTH]
 
     return cleaned
 
