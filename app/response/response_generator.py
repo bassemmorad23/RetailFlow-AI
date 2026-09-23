@@ -366,18 +366,39 @@ def _build_user_prompt(
 
 
 def _format_known_facts(facts: KnownFacts) -> str:
+    """
+    Render what we know about the customer for the prompt.
+
+    hard_constraints = must be respected (e.g. size, max budget)
+    soft_preferences = nice to match (e.g. favourite colour)
+    Keys are canonical industry field names; values may be scalars,
+    lists, or small dicts.
+    """
     parts: list[str] = []
 
-    if facts.preferred_size:
-        parts.append(f"size {facts.preferred_size}")
-    if facts.preferred_color:
-        parts.append(f"color {facts.preferred_color}")
-    if facts.budget_max is not None:
-        parts.append(f"budget up to {facts.budget_max}")
-    if facts.mentioned_products:
-        parts.append("interested in: " + ", ".join(facts.mentioned_products))
+    for key, value in facts.hard_constraints.items():
+        rendered = _render_fact_value(value)
+        if rendered:
+            parts.append(f"{key.replace('_', ' ')}: {rendered} (required)")
+
+    for key, value in facts.soft_preferences.items():
+        rendered = _render_fact_value(value)
+        if rendered:
+            parts.append(f"{key.replace('_', ' ')}: {rendered} (preferred)")
 
     return ", ".join(parts)
+
+
+def _render_fact_value(value) -> str:
+    """Turn a fact value into short readable text. Empty values -> ''."""
+    if value is None or value == "" or value == [] or value == {}:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return " or ".join(str(v) for v in value if v not in (None, ""))
+    if isinstance(value, dict):
+        return ", ".join(f"{k} {v}" for k, v in value.items() if v is not None)
+    return str(value)
+
 
 
 def _build_comparison_prompt(
