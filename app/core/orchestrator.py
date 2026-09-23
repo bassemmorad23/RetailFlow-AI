@@ -57,6 +57,11 @@ from app.response.response_generator import generate_response
 from app.analytics.conversation_logger import log_turn
 from app.comparison.comparison_service import compare_products
 from app.schemas.models import ComparisonResult
+from app.billing.plans import LIMIT_REACHED_REPLY
+from app.billing.usage import check_usage, record_ai_message
+from app.response.response_generator import FALLBACK_REPLY
+
+
 
 from app.schemas.models import (
     AgentReply,
@@ -68,6 +73,8 @@ from app.schemas.models import (
     KnownFacts,
     MemoryState,
 )
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +91,7 @@ _FALLBACK_INTENT = IntentResult(
     label=IntentLabel.OTHER,
     confidence=0.0,
 )
+_PIPELINE_ERROR_REPLY = "Sorry, I could not process your message."
 
 
 def _fallback_memory(conversation_id: str) -> MemoryState:
@@ -146,6 +154,36 @@ def handle_message(message: CustomerMessage) -> AgentReply:
     """
     total_started = time.monotonic()
 
+    # --- usage gate: before ANY LLM call ---
+    usage = _time_step(
+        "usage_check",
+        lambda: check_usage(message.store_id),
+        None,  # check failed (e.g. Mongo blip) -> fail open, logged as error
+    )
+    if usage is not None and not usage.allowed:
+        logger.warning(
+            "AI usage limit reached",
+            extra={
+                "limit_reason": usage.reason,
+                "monthly_used": usage.monthly_used,
+                "monthly_limit": usage.monthly_limit,
+                "daily_used": usage.daily_used,
+            },
+        )
+        _time_step(
+            "memory_add_turn_customer",
+            lambda: add_turn(message.store_id, message.conversation_id, "customer", message.text),
+            None,
+        )
+        return AgentReply(
+            conversation_id=message.conversation_id,
+            reply_text=LIMIT_REACHED_REPLY,
+            emotion=_FALLBACK_EMOTION,
+            intent=_FALLBACK_INTENT,
+            recommendations=[],
+            retrieved_context=[],
+        )
+
     emotion = _time_step(
         "emotion_detection",
         lambda: detect_emotion(message.text),
@@ -169,7 +207,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         lambda: retrieve_context(message.store_id, message.text),
         [],
     )
-    
+
     industry_id = _time_step(
         "industry_lookup",
         lambda: get_industry(message.store_id),
@@ -187,7 +225,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         ),
         [],
     )
-    
+
     # Comparison flow: intercept COMPARE_PRODUCTS intent (confidence-gated)
     # to prevent BART false positives from hijacking the response.
     comparison: ComparisonResult | None = None
@@ -202,8 +240,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             ),
             None,
         )
-    
-    
+
     reply_text = _time_step(
         "response_generation",
         lambda: generate_response(
@@ -216,8 +253,16 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             industry_id=industry_id,
             comparison=comparison,
         ),
-        "Sorry, I could not process your message.",
+        _PIPELINE_ERROR_REPLY,
     )
+
+    # Count only real AI replies, never error fallbacks
+    if reply_text not in (FALLBACK_REPLY, _PIPELINE_ERROR_REPLY):
+        _time_step(
+            "usage_record",
+            lambda: record_ai_message(message.store_id),
+            None,
+        )
 
     # --- writes: happen last, so nothing is persisted for a failed request ---
 
@@ -233,8 +278,6 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         None,
     )
 
-    
-
     new_facts = _time_step(
         "fact_extraction",
         lambda: extract_facts(message.text, industry_id),
@@ -245,17 +288,16 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         hard = {**memory.known_facts.hard_constraints, **new_facts.get("hard_constraints", {})}
         soft = {**memory.known_facts.soft_preferences, **new_facts.get("soft_preferences", {})}
 
-
         _time_step(
-        "memory_update_facts",
-        lambda: update_known_facts(
-            message.store_id,
-            message.conversation_id,
-            hard_constraints=hard,
-            soft_preferences=soft
-        ),
-        None,
-    )
+            "memory_update_facts",
+            lambda: update_known_facts(
+                message.store_id,
+                message.conversation_id,
+                hard_constraints=hard,
+                soft_preferences=soft,
+            ),
+            None,
+        )
 
     reply = AgentReply(
         conversation_id=message.conversation_id,

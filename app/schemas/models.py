@@ -4,6 +4,7 @@ from typing import Any, Literal, Optional
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator
 import re
+from datetime import datetime, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -966,6 +967,12 @@ class IndustryConfig(BaseModel):
 # Per-store settings
 # ---------------------------------------------------------------------------
 
+#helper function to get the default anchor day for billing
+def _default_anchor_day() -> int:
+    """Billing anchor = today's day of month, capped at 28 so every month has it."""
+    return min(datetime.now(timezone.utc).day, 28)
+
+
 
 class StoreSettings(BaseModel):
     """
@@ -1005,6 +1012,23 @@ class StoreSettings(BaseModel):
             "yet — pipeline uses generic behavior. Set once at merchant "
             "onboarding, rarely changed after."
         ),
+    )
+
+    plan: str = Field(
+        default="starter",
+        description="Subscription plan key: starter | pro | enterprise.",
+    )
+
+    enterprise_monthly_limit: int | None = Field(
+        default=None,
+        description="Custom monthly AI message limit. Only used when plan=enterprise.",
+    )
+
+    billing_anchor_day: int = Field(
+        default_factory=_default_anchor_day,
+        ge=1,
+        le=28,
+        description="Day of month the usage period resets.",
     )
 
     class Config:

@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
 
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-_FALLBACK_REPLY = (
+FALLBACK_REPLY = (
     "I'm sorry, I'm having trouble responding right now. "
     "Please try again in a moment."
 )
@@ -250,7 +250,7 @@ def generate_response(
         "All models in chain failed; returning fallback reply",
         extra={"chain_length": len(settings.response_model_chain)},
     )
-    return _FALLBACK_REPLY
+    return FALLBACK_REPLY
 
 
 # ---------------------------------------------------------------------------

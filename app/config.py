@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     META_REDIRECT_BASE_URL: str = "https://console-audacity-snort.ngrok-free.dev"
     META_WEBHOOK_VERIFY_TOKEN: str = "storeflow_verify_2026"
     META_FB_LOGIN_CONFIG_ID: str = ""
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
     response_model_chain: list[str] = [
     "openrouter/free"
 ]

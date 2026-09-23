@@ -662,3 +662,53 @@ def messenger_callback(code: str = "", state: str = "", error: str = "") -> dict
 
     logger.info("Messenger OAuth completed", extra={"page_name": page["name"]})
     return {"status": "installed", "store_id": store_id, "page_name": page["name"]}
+
+
+@app.get("/whatsapp/webhook")
+def whatsapp_webhook_verify(request: Request) -> PlainTextResponse:
+    """Meta webhook verification for WhatsApp."""
+    params = dict(request.query_params)
+    if (
+        params.get("hub.mode") == "subscribe"
+        and params.get("hub.verify_token") == settings.META_WEBHOOK_VERIFY_TOKEN
+    ):
+        logger.info("WhatsApp webhook verified")
+        return PlainTextResponse(content=params.get("hub.challenge", ""), status_code=200)
+    raise HTTPException(status_code=403, detail="Verification failed")
+
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook_receive(request: Request) -> dict:
+    """WhatsApp event receiver."""
+    from app.core.orchestrator import handle_message
+    from app.schemas.models import CustomerMessage
+    from app.channels.whatsapp_channel import send_text
+
+    payload = await request.json()
+    logger.info("WhatsApp webhook event", extra={"raw_payload": payload})
+
+    entries = payload.get("entry", []) if isinstance(payload, dict) else []
+    for entry in entries:
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            messages = value.get("messages", [])
+            for msg in messages:
+                if msg.get("type") != "text":
+                    continue
+                sender_phone = msg.get("from")
+                text = msg.get("text", {}).get("body", "")
+                if not (sender_phone and text):
+                    continue
+
+                # For now: single-tenant, use fixed store_id
+                # TODO: multi-tenant via phone_number_id lookup
+                store_id = "store_wa_test"
+
+                reply = handle_message(CustomerMessage(
+                    store_id=store_id,
+                    conversation_id=f"wa_{sender_phone}",
+                    text=text,
+                ))
+                send_text(sender_phone, reply.reply_text)
+
+    return {"status": "ok"}

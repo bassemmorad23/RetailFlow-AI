@@ -30,6 +30,7 @@ from pymongo.collection import Collection
 from app.config import settings
 from app.industries.registry import list_industries
 from app.schemas.models import StoreSettings
+from app.billing.plans import PLANS
 
 
 # ---------------------------------------------------------------------------
@@ -55,30 +56,34 @@ def _get_collection() -> Collection:
 # ---------------------------------------------------------------------------
 
 
+_BILLING_FIELDS = ("plan", "enterprise_monthly_limit", "billing_anchor_day")
+
+
 def get_settings(store_id: str) -> StoreSettings:
     """
-    Load a store's settings from MongoDB.
-
-    If no document exists for this store, creates one with defaults
-    (industry=None) and returns it. This means downstream code can
-    always assume settings exist — no None-checking required.
-
-    Rationale: settings are created on-demand rather than requiring
-    an explicit "create store" step, because in practice new stores
-    are discovered when their first request arrives.
+    Load a store's settings. Creates defaults on first access.
+    Backfills billing fields on older documents and persists them,
+    so billing_anchor_day is fixed once and never drifts.
     """
     col = _get_collection()
     doc = col.find_one({"store_id": store_id})
 
     if doc is None:
-        # Create default settings for this store on first access.
         fresh = StoreSettings(store_id=store_id, industry=None)
         col.insert_one(fresh.model_dump())
         return fresh
 
-    # Strip Mongo's _id before passing to Pydantic (extra='forbid' would reject it).
     doc.pop("_id", None)
-    return StoreSettings(**doc)
+    missing = [f for f in _BILLING_FIELDS if f not in doc]
+    store_settings = StoreSettings(**doc)
+
+    if missing:
+        col.update_one(
+            {"store_id": store_id},
+            {"$set": {f: getattr(store_settings, f) for f in missing}},
+        )
+
+    return store_settings
 
 
 def get_industry(store_id: str) -> Optional[str]:
@@ -127,5 +132,38 @@ def set_industry(store_id: str, industry_id: Optional[str]) -> StoreSettings:
         {"store_id": store_id},
         {"$set": {"store_id": store_id, "industry": industry_id}},
         upsert=True,
+    )
+    return get_settings(store_id)
+
+
+
+def set_plan(
+    store_id: str,
+    plan: str,
+    enterprise_monthly_limit: Optional[int] = None,
+) -> StoreSettings:
+    """
+    Change a store's plan. The new limit applies immediately because
+    limits are always read from the plan config at enforcement time.
+
+    Enterprise requires an explicit positive limit (no unlimited stores).
+    Non-enterprise plans clear any custom limit.
+    The billing anchor day is NOT changed on upgrade/downgrade.
+    """
+    if plan not in PLANS:
+        raise ValueError(f"Unknown plan '{plan}'. Available: {list(PLANS)}")
+
+    if plan == "enterprise":
+        if enterprise_monthly_limit is None or enterprise_monthly_limit <= 0:
+            raise ValueError("Enterprise plan requires a positive enterprise_monthly_limit.")
+    else:
+        enterprise_monthly_limit = None
+
+    get_settings(store_id)  # ensures document + anchor exist
+
+    col = _get_collection()
+    col.update_one(
+        {"store_id": store_id},
+        {"$set": {"plan": plan, "enterprise_monthly_limit": enterprise_monthly_limit}},
     )
     return get_settings(store_id)
