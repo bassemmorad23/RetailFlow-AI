@@ -455,6 +455,9 @@ def _process_instagram_entry(entry: dict) -> None:
         reply = handle_message(CustomerMessage(
             store_id=store_id,
             conversation_id=f"ig_{sender_id}",
+            customer_id=sender_id,
+            channel="instagram",
+
             text=text,
         ))
         send_dm(store_id, sender_id, reply.reply_text)
@@ -554,6 +557,8 @@ def _process_messenger_entry(entry: dict) -> None:
         reply = handle_message(CustomerMessage(
             store_id=store_id,
             conversation_id=f"fb_{sender_id}",
+            customer_id=sender_id,
+            channel="messenger",
             text=text,
         ))
         send_message(store_id, sender_id, reply.reply_text)
@@ -611,6 +616,8 @@ def _process_whatsapp_entry(entry: dict) -> None:
             reply = handle_message(CustomerMessage(
                 store_id=store_id,
                 conversation_id=f"wa_{sender_phone}",
+                customer_id=sender_phone,
+                channel="whatsapp",
                 text=text,
             ))
             send_text(sender_phone, reply.reply_text)

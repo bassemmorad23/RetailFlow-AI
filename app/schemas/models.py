@@ -42,7 +42,7 @@ class IntentLabel(str, Enum):
 
 
 # Where the customer message came from.
-Channel = Literal["web", "instagram", "whatsapp"]
+Channel = Literal["web", "instagram", "messenger", "whatsapp"]
 
 
 # Supported primitive types for FieldDefinition values.
