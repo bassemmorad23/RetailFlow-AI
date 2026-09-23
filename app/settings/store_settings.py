@@ -31,6 +31,7 @@ from app.config import settings
 from app.industries.registry import list_industries
 from app.schemas.models import StoreSettings
 from app.billing.plans import PLANS
+from app.settings.regions import resolve_country_currency
 
 
 # ---------------------------------------------------------------------------
@@ -167,3 +168,28 @@ def set_plan(
         {"$set": {"plan": plan, "enterprise_monthly_limit": enterprise_monthly_limit}},
     )
     return get_settings(store_id)
+
+
+def create_store(
+    store_id: str,
+    display_name: str,
+    industry_id: str,
+    country: str,
+    currency: str | None = None,
+) -> StoreSettings:
+    """Create a brand-new store document. Caller generates store_id."""
+    registered = list_industries()
+    if industry_id not in registered:
+        raise ValueError(f"Unknown industry '{industry_id}'. Registered: {registered}")
+
+    country, currency = resolve_country_currency(country, currency)
+
+    fresh = StoreSettings(
+        store_id=store_id,
+        industry=industry_id,
+        display_name=display_name.strip(),
+        country=country,
+        currency=currency,
+    )
+    _get_collection().insert_one(fresh.model_dump())
+    return fresh
