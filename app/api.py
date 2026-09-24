@@ -76,6 +76,7 @@ from app.inbox.echoes import handle_business_echo
 from app.widget.routes import router as widget_router
 from app.channels.signatures import verify_meta_signature, webhook_secrets
 import json
+from app.security.production import docs_kwargs, is_production, require_metrics_access
 
 
 if settings.SENTRY_DSN:
@@ -97,6 +98,7 @@ app = FastAPI(
     title="StoreFlow AI",
     description="Multi-tenant AI sales agent for retail stores.",
     version="0.1.0",
+    **docs_kwargs(settings.APP_ENV),
 )
 
 app.include_router(auth_router)
@@ -164,6 +166,8 @@ async def _verified_payload(request: Request, channel: str) -> dict:
 
 @app.get("/", include_in_schema=False)
 def root():
+    if is_production():
+        return {"service": "StoreFlow AI", "status": "ok"}
     return RedirectResponse(url="/docs")
 
 
@@ -173,9 +177,9 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/metrics")
+@app.get("/metrics", include_in_schema=False, dependencies=[Depends(require_metrics_access)])
 def metrics() -> dict:
-    """Operational counts/latencies only. TODO: lock down before production."""
+    """Operational counts/latencies. Token-protected in production."""
     return get_metrics()
 
 
