@@ -1,54 +1,36 @@
 from functools import lru_cache
-from pymongo import MongoClient
+from pymongo import MongoClient , ReturnDocument
 from pymongo.collection import Collection
-
-
-
-
-
-
+from pymongo.errors import DuplicateKeyError
 from app.config import settings
 from app.schemas.models import ConversationTurn ,KnownFacts ,MemoryState
 
 
-
-
 _MAX_HISTORY_TURNS = 20
-
-
-
 
 @lru_cache(maxsize=1)
 def _get_collection():
-    
-    client=MongoClient(settings.MONGO_URI)
-    db=client[settings.MONGO_DB]
-    return db["conversations"]
+    client = MongoClient(settings.MONGO_URI)
+    col = client[settings.MONGO_DB]["conversations"]
+    col.create_index([("store_id", 1), ("conversation_id", 1)], unique=True)
+    return col
 
 
 
 def get_memory(store_id: str, conversation_id: str) -> MemoryState:
+    """Load memory, creating it atomically if missing (safe under concurrent first messages)."""
     col = _get_collection()
-    doc = col.find_one({"store_id": store_id, "conversation_id": conversation_id})
-    
-    if doc is None:
-        fresh = MemoryState(
-            conversation_id=conversation_id,
-            history=[],
-            known_facts=KnownFacts(),
+    flt = {"store_id": store_id, "conversation_id": conversation_id}
+    try:
+        doc = col.find_one_and_update(
+            flt,
+            {"$setOnInsert": {"history": [], "known_facts": KnownFacts().model_dump()}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
         )
-        doc_to_save = fresh.model_dump()
-        doc_to_save["store_id"] = store_id
-        col.insert_one(doc_to_save)
-        return fresh
-
+    except DuplicateKeyError:
+        doc = col.find_one(flt)
     return _doc_to_memory(doc)
-
-
-
-
-
-
 
 
 def _doc_to_memory(doc:dict):
@@ -60,26 +42,19 @@ def _doc_to_memory(doc:dict):
         
     )
     
-    
-    
-
-
-
 
 def add_turn(store_id: str, conversation_id: str, role: str, text: str) -> MemoryState:
-    memory = get_memory(store_id, conversation_id)
-    memory.history.append(ConversationTurn(role=role, text=text))
-    memory.history = memory.history[-_MAX_HISTORY_TURNS:]
-
+    """Append a turn atomically, keeping only the last _MAX_HISTORY_TURNS."""
     col = _get_collection()
     col.update_one(
         {"store_id": store_id, "conversation_id": conversation_id},
-        {"$set": {"history": [t.model_dump() for t in memory.history]}},
+        {"$push": {"history": {
+            "$each": [ConversationTurn(role=role, text=text).model_dump()],
+            "$slice": -_MAX_HISTORY_TURNS,
+        }}},
+        upsert=True,
     )
-    return memory
-
-
-
+    return get_memory(store_id, conversation_id)
 
 
 

@@ -5,11 +5,9 @@ Uses per-store credentials.
 
 import logging
 import httpx
-
 from app.settings.store_credentials import get_credentials
 
 logger = logging.getLogger(__name__)
-
 
 def send_dm(store_id: str, recipient_id: str, text: str) -> bool:
     """Send a DM to a customer. Returns True on success."""
