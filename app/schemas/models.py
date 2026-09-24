@@ -2,7 +2,7 @@
 
 from typing import Any, Literal, Optional
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import ConfigDict, BaseModel, Field, field_validator
 import re
 from datetime import datetime, timezone
 
@@ -128,8 +128,7 @@ class CustomerMessage(BaseModel):
     def _text_must_be_clean(cls, v: str) -> str:
         return _clean_customer_text(v)
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +143,7 @@ class EmotionResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     scores: dict[str, float] = Field(default_factory=dict)
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class IntentResult(BaseModel):
@@ -155,8 +153,7 @@ class IntentResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     scores: dict[str, float] = Field(default_factory=dict)
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 # ---------------------------------------------------------------------------
 # Product Variant Schema
@@ -187,8 +184,7 @@ class Variant(BaseModel):
     )
     image_url: str | None = Field(default=None, description="Variant-specific image.")
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 
@@ -311,8 +307,7 @@ class Product(BaseModel):
     stock_available: bool = True
     image_url: Optional[str] = None
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
         
 
 
@@ -340,8 +335,7 @@ class ProductRecommendation(BaseModel):
         ),
     )
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
         
         
         
@@ -361,8 +355,7 @@ class ComparisonRow(BaseModel):
         description="{product_id: value or None}. None = field not present on that product.",
     )
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class ComparisonResult(BaseModel):
@@ -395,8 +388,7 @@ class ComparisonResult(BaseModel):
         description="Suggested alternatives from same store for not-found products.",
     )
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 
@@ -427,8 +419,7 @@ class RetrievedChunk(BaseModel):
     name: str | None = Field(default=None, description="Product name if this chunk is a product.")
     price: float | None = Field(default=None, description="Product price if applicable.")
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 # ---------------------------------------------------------------------------
 # Memory
@@ -442,8 +433,7 @@ class ConversationTurn(BaseModel):
     text: str
     timestamp: str | None = None
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class KnownFacts(BaseModel):
@@ -470,8 +460,7 @@ class KnownFacts(BaseModel):
     # Soft preferences — influence ranking, not filtering
     soft_preferences: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class MemoryState(BaseModel):
@@ -481,8 +470,7 @@ class MemoryState(BaseModel):
     history: list[ConversationTurn] = Field(default_factory=list)
     known_facts: KnownFacts = Field(default_factory=KnownFacts)
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 # ---------------------------------------------------------------------------
@@ -500,8 +488,7 @@ class AgentReply(BaseModel):
     retrieved_context: list[RetrievedChunk] = Field(default_factory=list)
     conversation_id: str
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 # ---------------------------------------------------------------------------
@@ -760,13 +747,8 @@ class FieldDefinition(BaseModel):
                 )
         return v
 
-    class Config:
-        """
-        Reject extra fields on the model itself so typos in
-        FieldDefinition construction fail loudly rather than silently
-        being ignored.
-        """
-        extra = "forbid"
+    # Reject extra fields so typos in FieldDefinition construction fail loudly.
+    model_config = ConfigDict(extra="forbid")
         
         
 # ---------------------------------------------------------------------------
@@ -953,12 +935,8 @@ class IndustryConfig(BaseModel):
             )
         return v
 
-    class Config:
-        """
-        Reject extra fields so typos in IndustryConfig construction
-        fail loudly rather than silently being ignored.
-        """
-        extra = "forbid"
+    # Reject extra fields so typos in IndustryConfig construction fail loudly.
+    model_config = ConfigDict(extra="forbid")
         
         
 
@@ -1038,8 +1016,7 @@ class StoreSettings(BaseModel):
         description="Day of month the usage period resets.",
     )
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
         
 
 # ---------------------------------------------------------------------------
@@ -1055,5 +1032,4 @@ class WooCommerceCredentialsRequest(BaseModel):
     username: str
     password: str
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
