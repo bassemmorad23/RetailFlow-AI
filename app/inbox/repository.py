@@ -114,6 +114,13 @@ def get_conversation(store_id: str, conversation_id: str) -> dict | None:
         {"store_id": store_id, "id": conversation_id}, _CONV_PROJECTION
     )
 
+def find_conversation_by_customer(store_id: str, channel: str, customer_external_id: str) -> dict | None:
+    """Look up without creating (used by widget polling)."""
+    return _db()["inbox_conversations"].find_one(
+        {"store_id": store_id, "thread_key": f"{channel}:{customer_external_id}"},
+        _CONV_PROJECTION,
+    )
+
 
 def _encode_cursor(doc: dict) -> str:
     raw = f"{doc['updated_at'].isoformat()}|{doc['id']}"

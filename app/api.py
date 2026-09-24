@@ -73,7 +73,7 @@ from app.settings.store_settings import get_industry, store_exists
 from app.stores.routes import router as stores_router
 from app.inbox.stream import router as inbox_stream_router
 from app.inbox.echoes import handle_business_echo
-
+from app.widget.routes import router as widget_router
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -98,12 +98,13 @@ app.include_router(auth_router)
 app.include_router(stores_router)
 app.include_router(inbox_router)
 app.include_router(inbox_stream_router)
+app.include_router(widget_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -169,60 +170,6 @@ def metrics() -> dict:
     """Operational counts/latencies only. TODO: lock down before production."""
     return get_metrics()
 
-
-# ---------------------------------------------------------------------------
-# Web widget chat
-# ---------------------------------------------------------------------------
-
-class ChatResponse(BaseModel):
-    conversation_id: str
-    reply_text: str | None
-    ai_paused: bool = False
-
-
-@app.post("/chat", response_model=ChatResponse)
-def chat(
-    request: Request,
-    message: CustomerMessage,
-    background_tasks: BackgroundTasks,
-    _rate_limit: None = Depends(rate_limit),
-) -> ChatResponse:
-    """
-    Web widget endpoint. Public by design, rate limited.
-    The channel is always "web" here, whatever the client sends.
-    reply_text is None when the merchant has paused the AI (their manual
-    reply reaches the widget through its live channel — Inbox Phase 3).
-    """
-    set_request_context(store_id=message.store_id, conversation_id=message.conversation_id)
-    if not store_exists(message.store_id):
-        raise HTTPException(status_code=404, detail="Store not found")
-
-    started = time.monotonic()
-    status_code = 200
-    try:
-        result = handle_incoming_message(
-            message.store_id, "web", message.customer_id, message.text,
-            refresh_summary=False,
-        )
-        background_tasks.add_task(maybe_refresh_summary, message.store_id, result.conversation_id)
-
-        delivered = (
-            result.reply is not None
-            and result.reply_message is not None
-            and result.reply_message.get("delivery_status") != "not_sent"
-        )
-        reply_text = result.reply.reply_text if delivered else None
-        return ChatResponse(
-            conversation_id=result.conversation_id,
-            reply_text=reply_text,
-            ai_paused=reply_text is None and not result.duplicate,
-        )
-    except Exception:
-        status_code = 500
-        raise
-    finally:
-        latency_ms = (time.monotonic() - started) * 1000
-        record_request(status_code=status_code, store_id=message.store_id, latency_ms=latency_ms)
 
 
 # ---------------------------------------------------------------------------
