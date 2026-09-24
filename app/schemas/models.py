@@ -33,6 +33,7 @@ class IntentLabel(str, Enum):
     READY_TO_BUY = "ready_to_buy"
     COMPLAINT = "complaint"
     COMPARE_PRODUCTS = "compare_products"
+    ORDER_STATUS = "order_status"
     OTHER = "other"
 
 

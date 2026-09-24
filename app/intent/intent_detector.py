@@ -13,11 +13,15 @@ _CANDIDATE_LABEL_TO_ENUM = {
 
     "The customer is asking for information or details about a product, such as material, fit, or care.": IntentLabel.ASKING_DETAILS,
 
-    "The customer is reporting a problem, dissatisfaction, delay, damage, or other complaint.": IntentLabel.COMPLAINT,
+    "The customer has a problem after buying: a complaint, a return, an exchange, a refund request, or a delivery problem.": IntentLabel.COMPLAINT,
+    "The customer wants to return, exchange or get a refund for a product they bought.": IntentLabel.COMPLAINT,
+    "The customer wants to return, exchange or get a refund for a product they bought.": IntentLabel.COMPLAINT,
 
     "The customer has decided to purchase a product or wants to place or confirm an order.": IntentLabel.READY_TO_BUY,
     
     "The customer wants to compare two or more specific products to see the differences between them.": IntentLabel.COMPARE_PRODUCTS,
+    
+    "The customer asks about the status, tracking or delivery time of an order they already placed.": IntentLabel.ORDER_STATUS,
 
     "The customer is asking something that does not fit the other shopping intents.": IntentLabel.OTHER,
 }
