@@ -369,7 +369,9 @@ def _build_user_prompt(
     if rec_lines:
         lines.append("\nRecommended products for this customer:")
         for rec in rec_lines:
-            lines.append(f"- {rec.name} (price: {rec.price})")
+            variant = ", ".join(f"{k}: {v}" for k, v in rec.variant_attrs.items())
+            variant_txt = f" [{variant}]" if variant else ""
+            lines.append(f"- {rec.name}{variant_txt} (price: {rec.price}) — {rec.reason}")
 
     lines.append(f"<customer_message>\n{message.text}\n</customer_message>")
     lines.append("\nYour reply:")
