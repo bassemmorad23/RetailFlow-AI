@@ -91,7 +91,7 @@ _FALLBACK_INTENT = IntentResult(
     label=IntentLabel.OTHER,
     confidence=0.0,
 )
-_PIPELINE_ERROR_REPLY = "Sorry, I could not process your message."
+PIPELINE_ERROR_REPLY = "Sorry, I could not process your message."
 
 
 def _fallback_memory(conversation_id: str) -> MemoryState:
@@ -253,11 +253,11 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             industry_id=industry_id,
             comparison=comparison,
         ),
-        _PIPELINE_ERROR_REPLY,
+        PIPELINE_ERROR_REPLY,
     )
 
     # Count only real AI replies, never error fallbacks
-    if reply_text not in (FALLBACK_REPLY, _PIPELINE_ERROR_REPLY):
+    if reply_text not in (FALLBACK_REPLY, PIPELINE_ERROR_REPLY):
         _time_step(
             "usage_record",
             lambda: record_ai_message(message.store_id),

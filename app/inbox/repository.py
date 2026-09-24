@@ -235,13 +235,25 @@ def set_delivery(
     message_id: str,
     status: str,
     *,
-    external_message_id: str | None = None,
+    external_message_ids: list[str] | None = None,
     error: str | None = None,
 ) -> None:
     fields: dict = {"delivery_status": status, "delivery_error": error}
-    if external_message_id:
-        fields["external_message_id"] = external_message_id
+    if external_message_ids:
+        fields["external_message_id"] = external_message_ids[0]
+        fields["external_message_ids"] = external_message_ids
     _db()["inbox_messages"].update_one({"store_id": store_id, "id": message_id}, {"$set": fields})
+    
+    
+def set_ai_mode(store_id: str, conversation_id: str, mode: str) -> bool:
+    """Set auto/paused. True if the conversation exists for this store."""
+    if mode not in ("auto", "paused"):
+        raise ValueError(f"Invalid ai_mode '{mode}'")
+    result = _db()["inbox_conversations"].update_one(
+        {"store_id": store_id, "id": conversation_id},
+        {"$set": {"ai_mode": mode, "ai_mode_changed_at": _now()}},
+    )
+    return result.matched_count == 1
 
 
 def list_messages(
