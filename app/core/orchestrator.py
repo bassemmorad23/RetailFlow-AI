@@ -60,6 +60,7 @@ from app.schemas.models import ComparisonResult
 from app.billing.plans import LIMIT_REACHED_REPLY
 from app.billing.usage import check_usage, record_ai_message
 from app.response.response_generator import FALLBACK_REPLY
+from app.inbox.summary import ConversationContext
 
 
 
@@ -148,7 +149,7 @@ def _time_step(step_name: str, fn: Callable[[], Any], fallback: Any) -> Any:
 
 # --- Main pipeline -----------------------------------------------------------
 
-def handle_message(message: CustomerMessage) -> AgentReply:
+def handle_message(message: CustomerMessage, context: ConversationContext | None = None) -> AgentReply:
     """
     Run the full pipeline for one incoming message.
     """
@@ -201,6 +202,12 @@ def handle_message(message: CustomerMessage) -> AgentReply:
         lambda: get_memory(message.store_id, message.conversation_id),
         _fallback_memory(message.conversation_id),
     )
+    
+    # Inbox conversations: recent turns come from the inbox (includes merchant
+    # replies); everything older is represented by the summary.
+    if context is not None:
+        memory = memory.model_copy(update={"history": context.turns})
+        
 
     retrieved_context = _time_step(
         "rag_retrieval",
@@ -252,6 +259,7 @@ def handle_message(message: CustomerMessage) -> AgentReply:
             recommendations=recommendations,
             industry_id=industry_id,
             comparison=comparison,
+            summary=context.summary if context else None,
         ),
         PIPELINE_ERROR_REPLY,
     )

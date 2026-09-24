@@ -6,11 +6,13 @@ for every channel (Instagram, Messenger, WhatsApp, web).
   2. store the customer message (platform retries are deduplicated)
   3. emit live events for the merchant's inbox
   4. if AI is paused -> stop here (no LLM call, no cost)
-  5. run the AI pipeline
+  5. run the AI with summary + recent messages as context
   6. re-check AI status (merchant may have paused meanwhile)
   7. store the reply, send it through the channel, record delivery
+  8. refresh the conversation summary if enough new messages
 
-Event emission is best-effort: a failed event never breaks a conversation.
+Event emission and summary refresh are best-effort: a failure there never
+breaks a conversation.
 """
 
 import logging
@@ -20,6 +22,7 @@ from app.billing.plans import LIMIT_REACHED_REPLY
 from app.channels.dispatcher import send
 from app.core.orchestrator import PIPELINE_ERROR_REPLY, handle_message
 from app.inbox import repository as repo
+from app.inbox.summary import build_context, maybe_refresh_summary
 from app.response.response_generator import FALLBACK_REPLY
 from app.schemas.models import AgentReply, CustomerMessage
 
@@ -45,7 +48,12 @@ def handle_incoming_message(
     text: str,
     *,
     external_message_id: str | None = None,
+    refresh_summary: bool = True,
 ) -> IncomingResult:
+    """
+    refresh_summary=False lets synchronous callers (web /chat) schedule the
+    summary refresh in the background instead of delaying the response.
+    """
     conv = repo.get_or_create_conversation(store_id, channel, customer_external_id)
     cid = conv["id"]
 
@@ -62,15 +70,20 @@ def handle_incoming_message(
 
     if not _ai_enabled(store_id, cid):
         logger.info("AI paused: message stored for merchant", extra={"inbox_conversation": cid})
+        _after(store_id, cid, refresh_summary)
         return IncomingResult(conversation_id=cid)
 
-    reply = handle_message(CustomerMessage(
-        conversation_id=cid,
-        customer_id=customer_external_id,
-        store_id=store_id,
-        text=text,
-        channel=channel,
-    ))
+    context = build_context(store_id, cid, before_seq=customer_msg["seq"])
+    reply = handle_message(
+        CustomerMessage(
+            conversation_id=cid,
+            customer_id=customer_external_id,
+            store_id=store_id,
+            text=text,
+            channel=channel,
+        ),
+        context=context,
+    )
 
     sender_type = "system" if reply.reply_text in _SYSTEM_REPLIES else "ai"
     ai_meta = _ai_meta(reply) if sender_type == "ai" else None
@@ -87,6 +100,7 @@ def handle_incoming_message(
     if not still_enabled:
         logger.info("AI reply suppressed: paused during generation", extra={"inbox_conversation": cid})
         _emit_conversation_updated(store_id, cid)
+        _after(store_id, cid, refresh_summary)
         return IncomingResult(conversation_id=cid, reply=reply, reply_message=reply_msg)
 
     result = send(channel, store_id, customer_external_id, reply.reply_text)
@@ -101,6 +115,7 @@ def handle_incoming_message(
         "message_id": reply_msg["id"], "delivery_status": status, "delivery_error": result.error_code,
     })
     _emit_conversation_updated(store_id, cid)
+    _after(store_id, cid, refresh_summary)
 
     return IncomingResult(
         conversation_id=cid, ai_replied=result.ok, reply=reply, reply_message=reply_msg,
@@ -108,6 +123,11 @@ def handle_incoming_message(
 
 
 # ---------------------------------------------------------------- helpers
+
+def _after(store_id: str, conversation_id: str, refresh_summary: bool) -> None:
+    if refresh_summary:
+        maybe_refresh_summary(store_id, conversation_id)
+
 
 def _ai_enabled(store_id: str, conversation_id: str) -> bool:
     conv = repo.get_conversation(store_id, conversation_id)
@@ -144,4 +164,4 @@ def _emit_conversation_updated(store_id: str, conversation_id: str) -> None:
         return
     fields = ("id", "channel", "ai_mode", "unread_count", "last_message", "updated_at")
     _emit(store_id, "conversation.updated", conversation_id,
-          {"conversation": {k: conv.get(k) for k in fields}})   
+          {"conversation": {k: conv.get(k) for k in fields}})

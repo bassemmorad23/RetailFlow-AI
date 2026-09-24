@@ -13,6 +13,7 @@ from app.core import orchestrator
 from app.inbox import repository as repo
 from app.inbox import service
 from app.schemas.models import AgentReply
+import itertools
 
 
 def _reply(text: str) -> AgentReply:
@@ -26,10 +27,12 @@ def _reply(text: str) -> AgentReply:
 @pytest.fixture
 def env(monkeypatch):
     """Fake AI + fake channel send. Returns call recorders."""
-    calls = {"ai": [], "sent": [], "reply_text": "We have size M.", "send_result": SendResult(True, ["mid_1"])}
-
-    def fake_ai(msg):
+    ids = itertools.count(1)
+    calls = {"ai": [], "sent": [], "reply_text": "We have size M.", "send_result": None}
+    
+    def fake_ai(msg, context=None):
         calls["ai"].append(msg)
+        calls.setdefault("contexts", []).append(context)
         hook = calls.get("during_ai")
         if hook:
             hook(msg)
@@ -37,10 +40,11 @@ def env(monkeypatch):
 
     def fake_send(channel, store_id, recipient, text):
         calls["sent"].append((channel, store_id, recipient, text))
-        return calls["send_result"]
-
+        return calls["send_result"] or SendResult(True, [f"mid_{next(ids)}"])
+    
     monkeypatch.setattr(service, "handle_message", fake_ai)
     monkeypatch.setattr(service, "send", fake_send)
+    monkeypatch.setattr(service, "maybe_refresh_summary", lambda *a, **k: False)
     return calls
 
 
@@ -119,9 +123,28 @@ def test_same_customer_two_stores_are_separate(env):
     assert repo.get_conversation(b, ra.conversation_id) is None
 
 
+def test_ai_context_excludes_current_message(env):
+    sid = _store()
+    service.handle_incoming_message(sid, "whatsapp", "2010006", "first")
+    service.handle_incoming_message(sid, "whatsapp", "2010006", "second")
+    ctx = env["contexts"][-1]
+    texts = [t.text for t in ctx.turns]
+    assert texts == ["first", "We have size M."]  # history only, not "second" itself
+
+
 def test_events_emitted_in_order(env):
     sid = _store()
     service.handle_incoming_message(sid, "whatsapp", "2010005", "hi")
     types = [e["type"] for e in repo.events_after(sid, 0)]
     assert types[0] == "message.created" and "message.updated" in types
     assert types.count("message.created") == 2
+    
+    
+def test_duplicate_platform_id_never_crashes_delivery():
+    sid = _store()
+    cid = repo.get_or_create_conversation(sid, "instagram", "igu9")["id"]
+    a = repo.add_message(sid, cid, "ai", "one", delivery_status="pending")
+    b = repo.add_message(sid, cid, "ai", "two", delivery_status="pending")
+    repo.set_delivery(sid, a["id"], "sent", external_message_ids=["same_id"])
+    repo.set_delivery(sid, b["id"], "sent", external_message_ids=["same_id"])  # must not raise
+    assert _messages(sid, cid)[-1]["delivery_status"] == "sent"

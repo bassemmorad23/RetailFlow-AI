@@ -27,13 +27,14 @@ from functools import lru_cache
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
-
+import logging
 from app.config import settings
 
 EVENT_TTL = timedelta(hours=24)
 MAX_PAGE = 100
 _CONV_PROJECTION = {"_id": 0, "thread_key": 0}
 
+logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def _db() -> Database:
@@ -238,11 +239,19 @@ def set_delivery(
     external_message_ids: list[str] | None = None,
     error: str | None = None,
 ) -> None:
+    """Record delivery. Never raises on an id conflict: the status always gets saved."""
+    col = _db()["inbox_messages"]
+    flt = {"store_id": store_id, "id": message_id}
     fields: dict = {"delivery_status": status, "delivery_error": error}
     if external_message_ids:
         fields["external_message_id"] = external_message_ids[0]
         fields["external_message_ids"] = external_message_ids
-    _db()["inbox_messages"].update_one({"store_id": store_id, "id": message_id}, {"$set": fields})
+    try:
+        col.update_one(flt, {"$set": fields})
+    except DuplicateKeyError:
+        logger.warning("Platform message id already stored; saving status without it")
+        fields.pop("external_message_id", None)
+        col.update_one(flt, {"$set": fields})
     
     
 def set_ai_mode(store_id: str, conversation_id: str, mode: str) -> bool:

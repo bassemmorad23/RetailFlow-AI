@@ -196,6 +196,7 @@ def generate_response(
     recommendations: Iterable[ProductRecommendation],
     industry_id: str | None,
     comparison: "ComparisonResult | None" = None,
+    summary: str | None = None,
 ) -> str:
     """
     Build the prompt and call the model chain in order. The first model
@@ -215,6 +216,7 @@ def generate_response(
             memory=memory,
             retrieved_context=retrieved_context,
             recommendations=recommendations,
+            summary=summary,
         )
 
     for model in settings.response_model_chain:
@@ -332,6 +334,7 @@ def _build_user_prompt(
     memory: MemoryState,
     retrieved_context: Iterable[RetrievedChunk],
     recommendations: Iterable[ProductRecommendation],
+    summary: str | None = None,
 ) -> str:
     lines: list[str] = []
 
@@ -342,9 +345,15 @@ def _build_user_prompt(
     if facts_line:
         lines.append(f"Known customer preferences: {facts_line}")
 
+    if summary:
+        lines.append(
+            "\nConversation summary so far (background only — product data, prices, "
+            "stock and order status given below always take precedence):\n" + summary
+        )
+
     if memory.history:
         lines.append("\nConversation so far:")
-        for turn in memory.history[-6:]:
+        for turn in memory.history[-12:]:
             lines.append(f"- {turn.role}: {turn.text}")
 
     context_lines = list(retrieved_context)
