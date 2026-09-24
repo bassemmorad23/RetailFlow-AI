@@ -26,7 +26,7 @@ import uuid
 
 import sentry_sdk
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from app.security.cors_csrf import CorsCsrfMiddleware
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -105,13 +105,7 @@ app.include_router(inbox_router)
 app.include_router(inbox_stream_router)
 app.include_router(widget_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type", "Authorization"],
-)
-
+app.add_middleware(CorsCsrfMiddleware)
 
 @app.middleware("http")
 async def add_request_context(request: Request, call_next):
