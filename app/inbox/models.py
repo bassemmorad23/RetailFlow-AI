@@ -15,7 +15,8 @@ from app.schemas.models import Channel
 
 SenderType = Literal["customer", "ai", "human", "system"]
 AiMode = Literal["auto", "paused"]
-DeliveryStatus = Literal["received", "pending", "sent", "failed", "not_sent"]
+# internal = note visible to the merchant only (e.g. "AI paused"), never sent
+DeliveryStatus = Literal["received", "pending", "sent", "failed", "not_sent", "internal"]
 
 
 class _Base(BaseModel):
@@ -47,11 +48,15 @@ class InboxConversation(_Base):
     customer: CustomerRef
     ai_mode: AiMode = "auto"
     ai_mode_changed_at: datetime | None = None
+    ai_mode_changed_by: str | None = None
     status: Literal["open"] = "open"
     last_message: LastMessage | None = None
     message_seq: int = 0
     unread_count: int = 0
+    last_read_at: datetime | None = None
     last_customer_message_at: datetime | None = None
+    reply_window_open: bool = True
+    reply_window_expires_at: datetime | None = None
     summary: ConversationSummary = Field(default_factory=ConversationSummary)
     created_at: datetime
     updated_at: datetime
@@ -76,4 +81,5 @@ class InboxMessage(_Base):
     delivery_error: str | None = None
     external_message_id: str | None = None
     sent_by_user_id: str | None = None
+    client_message_id: str | None = None
     ai_meta: AiMeta | None = None

@@ -32,7 +32,13 @@ CONTEXT_MAX_MESSAGES = 30
 _MAX_SUMMARY_INPUT_MESSAGES = 60
 _MAX_SUMMARY_CHARS = 1500
 
+
 _LABELS = {"customer": "Customer", "ai": "AI assistant", "human": "Merchant", "system": "System"}
+
+# Never shown to the AI or the summary: undelivered drafts and merchant-only notes.
+_HIDDEN_FROM_AI = {"not_sent", "internal"}
+
+
 
 _client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -82,7 +88,7 @@ def build_context(store_id: str, conversation_id: str, *, before_seq: int | None
                                  limit=CONTEXT_MAX_MESSAGES)
     turns = [
         _to_turn(m) for m in msgs
-        if m["seq"] > covers and m.get("delivery_status") != "not_sent"
+        if m["seq"] > covers and m.get("delivery_status") not in _HIDDEN_FROM_AI
     ]
     return ConversationContext(summary=conv["summary"]["text"], turns=turns)
 
@@ -114,7 +120,7 @@ def maybe_refresh_summary(store_id: str, conversation_id: str, *, force: bool = 
         if not fetched:
             return False
         new_covers = fetched[-1]["seq"]
-        visible = [m for m in fetched if m.get("delivery_status") != "not_sent"]
+        visible = [m for m in fetched if m.get("delivery_status") not in _HIDDEN_FROM_AI]
 
         text = _generate_summary(previous["text"], visible) if visible else previous["text"]
         if text is None:

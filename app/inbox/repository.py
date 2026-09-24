@@ -14,12 +14,15 @@ Nothing is ever looked up by conversation/message id alone.
 CONCURRENCY:
 - conversation creation: atomic upsert on unique (store_id, thread_key)
 - message seq: atomic $inc on the conversation
-- dedupe: unique (store_id, external_message_id) -> Meta retries are ignored
+- dedupe: unique (store_id, external_message_id) -> Meta retries ignored
+- manual replies: unique (store_id, client_message_id) -> double clicks ignored
 - last_message / timestamps: only move forward ($max, seq-guarded $set)
+- ai_mode changes: conditional (only if still in the expected mode)
 - summary: compare-and-set on covers_through_seq (newer always wins)
 """
 
 import base64
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -27,14 +30,16 @@ from functools import lru_cache
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
-import logging
+
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 EVENT_TTL = timedelta(hours=24)
 MAX_PAGE = 100
 _CONV_PROJECTION = {"_id": 0, "thread_key": 0}
+_MSG_PROJECTION = {"_id": 0, "external_message_ids": 0}
 
-logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def _db() -> Database:
@@ -53,6 +58,8 @@ def _db() -> Database:
                       unique=True)
     msgs.create_index([("store_id", ASCENDING), ("external_message_id", ASCENDING)], unique=True,
                       partialFilterExpression={"external_message_id": {"$type": "string"}})
+    msgs.create_index([("store_id", ASCENDING), ("client_message_id", ASCENDING)], unique=True,
+                      partialFilterExpression={"client_message_id": {"$type": "string"}})
 
     events = db["inbox_events"]
     events.create_index([("store_id", ASCENDING), ("seq", ASCENDING)], unique=True)
@@ -82,10 +89,12 @@ def get_or_create_conversation(store_id: str, channel: str, customer_external_id
         "customer": {"external_id": customer_external_id, "display_name": None},
         "ai_mode": "auto",
         "ai_mode_changed_at": None,
+        "ai_mode_changed_by": None,
         "status": "open",
         "last_message": None,
         "message_seq": 0,
         "unread_count": 0,
+        "last_read_at": None,
         "last_customer_message_at": None,
         "summary": {"text": "", "covers_through_seq": 0, "updated_at": None},
         "created_at": now,
@@ -151,6 +160,36 @@ def list_conversations(
     return docs[:limit], next_cursor
 
 
+def set_ai_mode(store_id: str, conversation_id: str, mode: str) -> bool:
+    """Set auto/paused unconditionally. True if the conversation exists for this store."""
+    if mode not in ("auto", "paused"):
+        raise ValueError(f"Invalid ai_mode '{mode}'")
+    result = _db()["inbox_conversations"].update_one(
+        {"store_id": store_id, "id": conversation_id},
+        {"$set": {"ai_mode": mode, "ai_mode_changed_at": _now()}},
+    )
+    return result.matched_count == 1
+
+
+def change_ai_mode(
+    store_id: str, conversation_id: str, *, expected: str, new: str, changed_by: str | None
+) -> bool:
+    """Switch only if still in `expected` mode. True if this call made the change."""
+    result = _db()["inbox_conversations"].update_one(
+        {"store_id": store_id, "id": conversation_id, "ai_mode": expected},
+        {"$set": {"ai_mode": new, "ai_mode_changed_at": _now(), "ai_mode_changed_by": changed_by}},
+    )
+    return result.modified_count == 1
+
+
+def mark_read(store_id: str, conversation_id: str) -> bool:
+    result = _db()["inbox_conversations"].update_one(
+        {"store_id": store_id, "id": conversation_id},
+        {"$set": {"unread_count": 0, "last_read_at": _now()}},
+    )
+    return result.matched_count == 1
+
+
 # ---------------------------------------------------------------- messages
 
 def add_message(
@@ -162,11 +201,12 @@ def add_message(
     delivery_status: str,
     external_message_id: str | None = None,
     sent_by_user_id: str | None = None,
+    client_message_id: str | None = None,
     ai_meta: dict | None = None,
 ) -> dict | None:
     """
-    Append a message with the next seq. Returns the stored doc, or None if
-    external_message_id was already stored (platform retry / echo of our send).
+    Append a message with the next seq. Returns the stored doc, or None if it
+    was already stored (platform retry / echo / double click).
     Raises LookupError if the conversation doesn't belong to this store.
     """
     db = _db()
@@ -198,11 +238,12 @@ def add_message(
         "delivery_error": None,
         "external_message_id": external_message_id,
         "sent_by_user_id": sent_by_user_id,
+        "client_message_id": client_message_id,
         "ai_meta": ai_meta,
     }
     try:
         msgs.insert_one(doc)
-    except DuplicateKeyError:  # same external id raced in; seq gap is harmless
+    except DuplicateKeyError:  # same external/client id raced in; seq gap is harmless
         return None
     doc.pop("_id", None)
 
@@ -231,6 +272,13 @@ def _touch_conversation(store_id: str, conversation_id: str, msg: dict) -> None:
     )
 
 
+def get_message_by_client_id(store_id: str, conversation_id: str, client_message_id: str) -> dict | None:
+    return _db()["inbox_messages"].find_one(
+        {"store_id": store_id, "conversation_id": conversation_id, "client_message_id": client_message_id},
+        _MSG_PROJECTION,
+    )
+
+
 def set_delivery(
     store_id: str,
     message_id: str,
@@ -252,17 +300,6 @@ def set_delivery(
         logger.warning("Platform message id already stored; saving status without it")
         fields.pop("external_message_id", None)
         col.update_one(flt, {"$set": fields})
-    
-    
-def set_ai_mode(store_id: str, conversation_id: str, mode: str) -> bool:
-    """Set auto/paused. True if the conversation exists for this store."""
-    if mode not in ("auto", "paused"):
-        raise ValueError(f"Invalid ai_mode '{mode}'")
-    result = _db()["inbox_conversations"].update_one(
-        {"store_id": store_id, "id": conversation_id},
-        {"$set": {"ai_mode": mode, "ai_mode_changed_at": _now()}},
-    )
-    return result.matched_count == 1
 
 
 def list_messages(
@@ -274,7 +311,7 @@ def list_messages(
         query["seq"] = {"$lt": before_seq}
     limit = max(1, min(limit, MAX_PAGE))
     docs = list(
-        _db()["inbox_messages"].find(query, {"_id": 0})
+        _db()["inbox_messages"].find(query, _MSG_PROJECTION)
         .sort("seq", DESCENDING).limit(limit + 1)
     )
     has_more = len(docs) > limit
@@ -286,7 +323,7 @@ def messages_after(store_id: str, conversation_id: str, after_seq: int, limit: i
     return list(
         _db()["inbox_messages"].find(
             {"store_id": store_id, "conversation_id": conversation_id, "seq": {"$gt": after_seq}},
-            {"_id": 0},
+            _MSG_PROJECTION,
         ).sort("seq", ASCENDING).limit(limit)
     )
 

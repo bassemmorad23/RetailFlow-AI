@@ -25,6 +25,11 @@ from app.inbox import repository as repo
 from app.inbox.summary import build_context, maybe_refresh_summary
 from app.response.response_generator import FALLBACK_REPLY
 from app.schemas.models import AgentReply, CustomerMessage
+from app.inbox.events import (
+    emit as _emit,
+    emit_conversation_updated as _emit_conversation_updated,
+    emit_message_created as _emit_message_created,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,25 +148,3 @@ def _ai_meta(reply: AgentReply) -> dict:
     }
 
 
-def _public_message(msg: dict) -> dict:
-    return {k: v for k, v in msg.items() if k != "store_id"}
-
-
-def _emit(store_id: str, event_type: str, conversation_id: str, payload: dict) -> None:
-    try:
-        repo.append_event(store_id, event_type, conversation_id, payload)
-    except Exception:
-        logger.exception("Inbox event emit failed", extra={"inbox_event_type": event_type})
-
-
-def _emit_message_created(store_id: str, msg: dict) -> None:
-    _emit(store_id, "message.created", msg["conversation_id"], {"message": _public_message(msg)})
-
-
-def _emit_conversation_updated(store_id: str, conversation_id: str) -> None:
-    conv = repo.get_conversation(store_id, conversation_id)
-    if conv is None:
-        return
-    fields = ("id", "channel", "ai_mode", "unread_count", "last_message", "updated_at")
-    _emit(store_id, "conversation.updated", conversation_id,
-          {"conversation": {k: conv.get(k) for k in fields}})
