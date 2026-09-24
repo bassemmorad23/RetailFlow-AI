@@ -74,6 +74,9 @@ from app.stores.routes import router as stores_router
 from app.inbox.stream import router as inbox_stream_router
 from app.inbox.echoes import handle_business_echo
 from app.widget.routes import router as widget_router
+from app.channels.signatures import verify_meta_signature, webhook_secrets
+import json
+
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -87,6 +90,8 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB catalog file limit
+_MAX_WEBHOOK_BYTES = 1024 * 1024  # Meta payloads are small
+
 
 app = FastAPI(
     title="StoreFlow AI",
@@ -142,13 +147,22 @@ def _require_industry(store_id: str) -> str:
     return industry_id
 
 
-async def _read_json(request: Request) -> dict:
+
+
+
+async def _verified_payload(request: Request, channel: str) -> dict:
+    """Verify Meta's signature on the RAW body before parsing anything."""
+    raw = await request.body()
+    if len(raw) > _MAX_WEBHOOK_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    if not verify_meta_signature(raw, request.headers.get("X-Hub-Signature-256"), webhook_secrets(channel)):
+        logger.warning("Rejected webhook: invalid signature", extra={"webhook_channel": channel})
+        raise HTTPException(status_code=403, detail="Invalid signature")
     try:
-        payload = await request.json()
+        payload = json.loads(raw)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
     return payload if isinstance(payload, dict) else {}
-
 
 # ---------------------------------------------------------------------------
 # Public: root, health, metrics
@@ -397,7 +411,7 @@ def instagram_webhook_verify(request: Request) -> PlainTextResponse:
 @app.post("/instagram/webhook")
 async def instagram_webhook_receive(request: Request, background_tasks: BackgroundTasks) -> dict:
     """Acknowledge immediately; process in the background."""
-    payload = await _read_json(request)
+    payload = await _verified_payload(request, "instagram")
     entries = payload.get("entry", [])
     logger.info("Instagram webhook event received", extra={"webhook_entries": len(entries)})
     background_tasks.add_task(_process_entries, entries, _process_instagram_entry, "Instagram")
@@ -495,7 +509,7 @@ def messenger_webhook_verify(request: Request) -> PlainTextResponse:
 @app.post("/messenger/webhook")
 async def messenger_webhook_receive(request: Request, background_tasks: BackgroundTasks) -> dict:
     """Acknowledge immediately; process in the background."""
-    payload = await _read_json(request)
+    payload = await _verified_payload(request, "messenger")
     entries = payload.get("entry", [])
     logger.info("Messenger webhook event received", extra={"webhook_entries": len(entries)})
     background_tasks.add_task(_process_entries, entries, _process_messenger_entry, "Messenger")
@@ -554,7 +568,7 @@ def whatsapp_webhook_verify(request: Request) -> PlainTextResponse:
 @app.post("/whatsapp/webhook")
 async def whatsapp_webhook_receive(request: Request, background_tasks: BackgroundTasks) -> dict:
     """Acknowledge immediately; process in the background."""
-    payload = await _read_json(request)
+    payload = await _verified_payload(request, "whatsapp")
     entries = payload.get("entry", [])
     logger.info("WhatsApp webhook event received", extra={"webhook_entries": len(entries)})
     background_tasks.add_task(_process_entries, entries, _process_whatsapp_entry, "WhatsApp")

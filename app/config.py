@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     WHATSAPP_ACCESS_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
     WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
+    WHATSAPP_APP_SECRET: str = ""
     SESSION_COOKIE_NAME: str = "sf_session"
     SESSION_COOKIE_SECURE: bool = False  # MUST be True in production (HTTPS)
     response_model_chain: list[str] = [
