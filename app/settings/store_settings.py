@@ -193,3 +193,8 @@ def create_store(
     )
     _get_collection().insert_one(fresh.model_dump())
     return fresh
+
+
+def store_exists(store_id: str) -> bool:
+    """True if the store has a settings document. Never creates one."""
+    return _get_collection().count_documents({"store_id": store_id}, limit=1) > 0

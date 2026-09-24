@@ -1,28 +1,23 @@
 """
-FastAPI application — HTTP entrypoint for the agent.
+FastAPI application — HTTP entrypoint.
 
-WHY THIS IS A SEPARATE FILE FROM main.py:
-main.py is the CLI entrypoint (a dev/testing tool). This is the HTTP
-entrypoint. Both are thin wrappers around the SAME orchestrator.
+ALL CUSTOMER MESSAGES GO THROUGH ONE PATH:
+Instagram, Messenger, WhatsApp webhooks and the web /chat endpoint all call
+app.inbox.service.handle_incoming_message(). That service stores messages,
+respects pause/resume, runs the AI, sends through the right channel and
+feeds the merchant's live inbox. This file only parses platform payloads.
 
 WHY SYNC ENDPOINTS (def, not async def):
 The pipeline is synchronous (pymongo, local models, blocking HTTP).
-FastAPI runs plain `def` endpoints in a threadpool, so blocking code
-doesn't freeze the server. Webhooks are the exception: they are `async`
-only to read the body, then hand the (blocking) processing to a
-BackgroundTask so Meta gets an immediate 200 and the event loop is
-never blocked.
+FastAPI runs plain `def` endpoints in a threadpool. Webhooks are `async`
+only to read the body, then hand processing to a BackgroundTask so Meta
+gets an immediate 200 and the event loop is never blocked.
 
 AUTH MODEL:
 - Merchant endpoints (/stores/{store_id}/..., OAuth install) require a
   logged-in session AND store membership (require_store_member).
 - OAuth callbacks verify the logged-in user owns the store in `state`.
-- Webhooks, /chat, /health are public by design (called by Meta,
-  customers, and monitors).
-
-CORS:
-Still wide open for the widget during development. Will be tightened
-together with the CSRF origin check before the dashboard goes live.
+- Webhooks, /chat, /health are public by design.
 """
 
 import logging
@@ -33,15 +28,15 @@ import sentry_sdk
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, RedirectResponse
+from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user_id, require_store_member
 from app.auth.repository import is_store_member
 from app.auth.routes import router as auth_router
-from app.channels.instagram_channel import send_dm
-from app.channels.messenger_channel import send_message
-from app.channels.whatsapp_channel import send_text
 from app.config import settings
-from app.core.orchestrator import handle_message
+from app.inbox.routes import router as inbox_router
+from app.inbox.service import handle_incoming_message
+from app.inbox.summary import maybe_refresh_summary
 from app.ingestion.csv_adapter import CSVAdapter
 from app.ingestion.ingestion_service import IngestionResult, ingest_products
 from app.ingestion.shopify_adapter import ShopifyAdapter
@@ -67,14 +62,14 @@ from app.oauth.shopify_oauth import (
     verify_state,
 )
 from app.rate_limiter import rate_limit
-from app.schemas.models import AgentReply, CustomerMessage, WooCommerceCredentialsRequest
+from app.schemas.models import CustomerMessage, WooCommerceCredentialsRequest
 from app.settings.store_credentials import (
     find_store_by_fb_page,
     find_store_by_ig_account,
     get_credentials,
     set_credentials,
 )
-from app.settings.store_settings import get_industry
+from app.settings.store_settings import get_industry, store_exists
 from app.stores.routes import router as stores_router
 
 
@@ -99,6 +94,7 @@ app = FastAPI(
 
 app.include_router(auth_router)
 app.include_router(stores_router)
+app.include_router(inbox_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -126,10 +122,7 @@ async def add_request_context(request: Request, call_next):
 # ---------------------------------------------------------------------------
 
 def _require_state_owner(request: Request, store_id: str) -> None:
-    """
-    OAuth callbacks: the logged-in user must own the store named in `state`.
-    Prevents attaching an attacker's account to someone else's store.
-    """
+    """OAuth callbacks: the logged-in user must own the store named in `state`."""
     user_id = get_current_user_id(request)  # 401 if not logged in
     if not is_store_member(user_id, store_id):
         raise HTTPException(status_code=404, detail="Store not found")
@@ -154,7 +147,7 @@ async def _read_json(request: Request) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Public: root, health, metrics, chat
+# Public: root, health, metrics
 # ---------------------------------------------------------------------------
 
 @app.get("/", include_in_schema=False)
@@ -174,16 +167,53 @@ def metrics() -> dict:
     return get_metrics()
 
 
-@app.post("/chat", response_model=AgentReply)
-def chat(request: Request, message: CustomerMessage, _rate_limit: None = Depends(rate_limit)) -> AgentReply:
-    """Customer-facing chat (widget). Public by design, rate limited."""
+# ---------------------------------------------------------------------------
+# Web widget chat
+# ---------------------------------------------------------------------------
+
+class ChatResponse(BaseModel):
+    conversation_id: str
+    reply_text: str | None
+    ai_paused: bool = False
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(
+    request: Request,
+    message: CustomerMessage,
+    background_tasks: BackgroundTasks,
+    _rate_limit: None = Depends(rate_limit),
+) -> ChatResponse:
+    """
+    Web widget endpoint. Public by design, rate limited.
+    The channel is always "web" here, whatever the client sends.
+    reply_text is None when the merchant has paused the AI (their manual
+    reply reaches the widget through its live channel — Inbox Phase 3).
+    """
     set_request_context(store_id=message.store_id, conversation_id=message.conversation_id)
-    logger.info("Received message", extra={"channel": message.channel})
+    if not store_exists(message.store_id):
+        raise HTTPException(status_code=404, detail="Store not found")
 
     started = time.monotonic()
     status_code = 200
     try:
-        return handle_message(message)
+        result = handle_incoming_message(
+            message.store_id, "web", message.customer_id, message.text,
+            refresh_summary=False,
+        )
+        background_tasks.add_task(maybe_refresh_summary, message.store_id, result.conversation_id)
+
+        delivered = (
+            result.reply is not None
+            and result.reply_message is not None
+            and result.reply_message.get("delivery_status") != "not_sent"
+        )
+        reply_text = result.reply.reply_text if delivered else None
+        return ChatResponse(
+            conversation_id=result.conversation_id,
+            reply_text=reply_text,
+            ai_paused=reply_text is None and not result.duplicate,
+        )
     except Exception:
         status_code = 500
         raise
@@ -296,10 +326,7 @@ def shopify_install(shop: str, store_id: str) -> RedirectResponse:
 
 @app.get("/oauth/shopify/callback")
 def shopify_callback(request: Request) -> dict:
-    """
-    Shopify redirects here. Protected by server-stored random state + HMAC.
-    (Install is owner-only, so a valid state always belongs to the owner.)
-    """
+    """Shopify redirects here. Protected by server-stored random state + HMAC."""
     params = dict(request.query_params)
     code = params.get("code")
     shop = params.get("shop")
@@ -418,28 +445,19 @@ def instagram_webhook_verify(request: Request) -> PlainTextResponse:
 
 @app.post("/instagram/webhook")
 async def instagram_webhook_receive(request: Request, background_tasks: BackgroundTasks) -> dict:
-    """Acknowledge immediately; process in the background (never blocks the event loop)."""
+    """Acknowledge immediately; process in the background."""
     payload = await _read_json(request)
     entries = payload.get("entry", [])
     logger.info("Instagram webhook event received", extra={"webhook_entries": len(entries)})
-    background_tasks.add_task(_process_instagram_entries, entries)
+    background_tasks.add_task(_process_entries, entries, _process_instagram_entry, "Instagram")
     return {"status": "ok"}
 
 
-def _process_instagram_entries(entries: list) -> None:
-    for entry in entries:
-        try:
-            _process_instagram_entry(entry)
-        except Exception:
-            logger.exception("Failed to process IG entry")
-
-
 def _process_instagram_entry(entry: dict) -> None:
-    """Route inbound DMs through the orchestrator and send the reply."""
     for event in entry.get("messaging", []):
         message = event.get("message")
         if not message or message.get("is_echo"):
-            continue
+            continue  # echoes handled in Inbox Phase 3
 
         text = message.get("text")
         sender_id = event.get("sender", {}).get("id")
@@ -452,15 +470,10 @@ def _process_instagram_entry(entry: dict) -> None:
             logger.warning("No store for IG account", extra={"ig_recipient": recipient_id})
             continue
 
-        reply = handle_message(CustomerMessage(
-            store_id=store_id,
-            conversation_id=f"ig_{sender_id}",
-            customer_id=sender_id,
-            channel="instagram",
-
-            text=text,
-        ))
-        send_dm(store_id, sender_id, reply.reply_text)
+        handle_incoming_message(
+            store_id, "instagram", sender_id, text,
+            external_message_id=message.get("mid"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -526,16 +539,8 @@ async def messenger_webhook_receive(request: Request, background_tasks: Backgrou
     payload = await _read_json(request)
     entries = payload.get("entry", [])
     logger.info("Messenger webhook event received", extra={"webhook_entries": len(entries)})
-    background_tasks.add_task(_process_messenger_entries, entries)
+    background_tasks.add_task(_process_entries, entries, _process_messenger_entry, "Messenger")
     return {"status": "ok"}
-
-
-def _process_messenger_entries(entries: list) -> None:
-    for entry in entries:
-        try:
-            _process_messenger_entry(entry)
-        except Exception:
-            logger.exception("Failed to process Messenger entry")
 
 
 def _process_messenger_entry(entry: dict) -> None:
@@ -548,20 +553,16 @@ def _process_messenger_entry(entry: dict) -> None:
     for event in entry.get("messaging", []):
         message = event.get("message")
         if not message or message.get("is_echo"):
-            continue
+            continue  # echoes handled in Inbox Phase 3
         text = message.get("text")
         sender_id = event.get("sender", {}).get("id")
         if not (text and sender_id):
             continue
 
-        reply = handle_message(CustomerMessage(
-            store_id=store_id,
-            conversation_id=f"fb_{sender_id}",
-            customer_id=sender_id,
-            channel="messenger",
-            text=text,
-        ))
-        send_message(store_id, sender_id, reply.reply_text)
+        handle_incoming_message(
+            store_id, "messenger", sender_id, text,
+            external_message_id=message.get("mid"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -587,16 +588,8 @@ async def whatsapp_webhook_receive(request: Request, background_tasks: Backgroun
     payload = await _read_json(request)
     entries = payload.get("entry", [])
     logger.info("WhatsApp webhook event received", extra={"webhook_entries": len(entries)})
-    background_tasks.add_task(_process_whatsapp_entries, entries)
+    background_tasks.add_task(_process_entries, entries, _process_whatsapp_entry, "WhatsApp")
     return {"status": "ok"}
-
-
-def _process_whatsapp_entries(entries: list) -> None:
-    for entry in entries:
-        try:
-            _process_whatsapp_entry(entry)
-        except Exception:
-            logger.exception("Failed to process WhatsApp entry")
 
 
 def _process_whatsapp_entry(entry: dict) -> None:
@@ -613,11 +606,20 @@ def _process_whatsapp_entry(entry: dict) -> None:
             # TODO: multi-tenant via phone_number_id lookup (single test store for now)
             store_id = "store_wa_test"
 
-            reply = handle_message(CustomerMessage(
-                store_id=store_id,
-                conversation_id=f"wa_{sender_phone}",
-                customer_id=sender_phone,
-                channel="whatsapp",
-                text=text,
-            ))
-            send_text(store_id, sender_phone, reply.reply_text)
+            handle_incoming_message(
+                store_id, "whatsapp", sender_phone, text,
+                external_message_id=msg.get("id"),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Shared webhook processing
+# ---------------------------------------------------------------------------
+
+def _process_entries(entries: list, process_entry, channel_name: str) -> None:
+    """Process each entry independently; one bad entry never blocks the others."""
+    for entry in entries:
+        try:
+            process_entry(entry)
+        except Exception:
+            logger.exception(f"Failed to process {channel_name} entry")
