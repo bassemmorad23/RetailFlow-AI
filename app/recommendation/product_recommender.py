@@ -21,7 +21,7 @@ MATCHING:
 """
 
 from typing import Any
-
+from app.industries.fields import get_field
 from app.industries.registry import get_field
 from app.products.product_store import fetch_products
 from app.schemas.models import (

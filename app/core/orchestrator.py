@@ -61,7 +61,7 @@ from app.billing.plans import LIMIT_REACHED_REPLY
 from app.billing.usage import check_usage, record_ai_message
 from app.response.response_generator import FALLBACK_REPLY
 from app.inbox.summary import ConversationContext
-
+from app.memory.fact_extractor import extract_facts, merge_facts
 
 
 from app.schemas.models import (
@@ -293,8 +293,11 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
     )
 
     if new_facts:
-        hard = {**memory.known_facts.hard_constraints, **new_facts.get("hard_constraints", {})}
-        soft = {**memory.known_facts.soft_preferences, **new_facts.get("soft_preferences", {})}
+        hard, soft = merge_facts(
+            memory.known_facts.hard_constraints,
+            memory.known_facts.soft_preferences,
+            new_facts,
+        )
 
         _time_step(
             "memory_update_facts",
