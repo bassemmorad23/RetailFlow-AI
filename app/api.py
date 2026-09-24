@@ -620,4 +620,4 @@ def _process_whatsapp_entry(entry: dict) -> None:
                 channel="whatsapp",
                 text=text,
             ))
-            send_text(sender_phone, reply.reply_text)
+            send_text(store_id, sender_phone, reply.reply_text)

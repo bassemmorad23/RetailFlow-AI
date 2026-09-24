@@ -56,7 +56,7 @@ def test_whatsapp_entry_builds_valid_message(monkeypatch):
     ]}}]})
     msg = got["messages"][0]
     assert (msg.channel, msg.customer_id) == ("whatsapp", "201000000000")
-    assert got["sent"] == [("201000000000", "Hello!")]
+    assert got["sent"] == [("store_wa_test","201000000000", "Hello!")]
 
 
 def test_echo_and_non_text_are_ignored(monkeypatch):

@@ -1,33 +1,47 @@
-"""WhatsApp Cloud API channel."""
+"""
+WhatsApp Cloud API channel.
+
+Free-form text is only allowed within 24h of the customer's last message;
+outside that window Meta returns an error mapped to "window_closed".
+
+Credentials are still global (single test number). store_id is already in
+the signature so the multi-tenant switch later stays inside this module.
+"""
 
 import logging
+
 import httpx
+
+from app.channels.base import CHANNEL_TEXT_LIMITS, SendResult, send_parts, split_text
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def send_text(recipient_phone: str, text: str) -> bool:
-    """Send a text message via WhatsApp Cloud API.
+def send_text(store_id: str, recipient_phone: str, text: str) -> SendResult:
+    if not (settings.WHATSAPP_PHONE_NUMBER_ID and settings.WHATSAPP_ACCESS_TOKEN):
+        return SendResult(ok=False, error_code="not_configured")
 
-    Note: WhatsApp requires the customer to message us first (opens 24h window)
-    before we can send free-form text. Outside that window, only approved
-    templates can be sent.
-    """
-    try:
-        r = httpx.post(
-            f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages",
-            headers={"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"},
+    url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+
+    def post(part: str) -> httpx.Response:
+        return httpx.post(
+            url, headers=headers, timeout=30.0,
             json={
                 "messaging_product": "whatsapp",
                 "to": recipient_phone,
                 "type": "text",
-                "text": {"body": text},
+                "text": {"body": part},
             },
-            timeout=30.0,
         )
-        r.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("WhatsApp send failed")
-        return False
+
+    def extract(body: dict) -> str | None:
+        msgs = body.get("messages") or []
+        return msgs[0].get("id") if msgs else None
+
+    result = send_parts(post, split_text(text, CHANNEL_TEXT_LIMITS["whatsapp"]), extract)
+    if not result.ok:
+        logger.warning("WhatsApp send failed", extra={"send_error": result.error_code,
+                                                      "send_detail": result.error_detail})
+    return result

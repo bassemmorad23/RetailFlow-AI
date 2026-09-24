@@ -1,32 +1,37 @@
-"""Facebook Messenger channel: send replies via Graph API."""
+"""Facebook Messenger channel: send replies via the Page (per-store credentials)."""
 
 import logging
+
 import httpx
+
+from app.channels.base import CHANNEL_TEXT_LIMITS, SendResult, send_parts, split_text
 from app.settings.store_credentials import get_credentials
 
 logger = logging.getLogger(__name__)
 
 
-def send_message(store_id: str, recipient_psid: str, text: str) -> bool:
-    """Send a message to a customer via their Page-scoped ID (PSID)."""
+def send_message(store_id: str, recipient_psid: str, text: str) -> SendResult:
     creds = get_credentials(store_id, "messenger")
     if creds is None:
-        logger.error("No Messenger creds for store", extra={"store_id": store_id})
-        return False
+        logger.error("No Messenger creds for store")
+        return SendResult(ok=False, error_code="not_configured")
 
-    try:
-        resp = httpx.post(
-            f"https://graph.facebook.com/v21.0/{creds['page_id']}/messages",
-            params={"access_token": creds["page_access_token"]},
+    url = f"https://graph.facebook.com/v21.0/{creds['page_id']}/messages"
+    headers = {"Authorization": f"Bearer {creds['page_access_token']}"}
+
+    def post(part: str) -> httpx.Response:
+        return httpx.post(
+            url, headers=headers, timeout=30.0,
             json={
                 "recipient": {"id": recipient_psid},
-                "message": {"text": text},
+                "message": {"text": part},
                 "messaging_type": "RESPONSE",
             },
-            timeout=30.0,
         )
-        resp.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Messenger send failed")
-        return False
+
+    result = send_parts(post, split_text(text, CHANNEL_TEXT_LIMITS["messenger"]),
+                        lambda body: body.get("message_id"))
+    if not result.ok:
+        logger.warning("Messenger send failed", extra={"send_error": result.error_code,
+                                                       "send_detail": result.error_detail})
+    return result
