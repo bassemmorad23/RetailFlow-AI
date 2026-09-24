@@ -211,6 +211,7 @@ def add_message(
     """
     db = _db()
     msgs = db["inbox_messages"]
+    msgs.create_index([("store_id", ASCENDING), ("external_message_ids", ASCENDING)])
 
     if external_message_id and msgs.find_one(
         {"store_id": store_id, "external_message_id": external_message_id}, {"_id": 1}
@@ -275,6 +276,16 @@ def _touch_conversation(store_id: str, conversation_id: str, msg: dict) -> None:
 def get_message_by_client_id(store_id: str, conversation_id: str, client_message_id: str) -> dict | None:
     return _db()["inbox_messages"].find_one(
         {"store_id": store_id, "conversation_id": conversation_id, "client_message_id": client_message_id},
+        _MSG_PROJECTION,
+    )
+
+def find_message_by_external_id(store_id: str, external_id: str) -> dict | None:
+    """Match a platform message id against single-part and multi-part sends."""
+    return _db()["inbox_messages"].find_one(
+        {"store_id": store_id, "$or": [
+            {"external_message_id": external_id},
+            {"external_message_ids": external_id},
+        ]},
         _MSG_PROJECTION,
     )
 

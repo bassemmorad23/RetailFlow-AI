@@ -94,12 +94,15 @@ def get_credentials(store_id: str, source: str) -> dict[str, Any] | None:
         return None
     return doc.get("credentials")
 
-def find_store_by_ig_account(ig_business_account_id: str) -> str | None:
-    """Find which store owns a given Instagram Business account."""
+def find_store_by_ig_account(ig_account_id: str) -> str | None:
+    """Match either Instagram id: webhooks may use user_id, /me returns id."""
     col = _get_collection()
     doc = col.find_one({
         "source": "instagram",
-        "credentials.instagram_business_account_id": ig_business_account_id,
+        "$or": [
+            {"credentials.instagram_business_account_id": ig_account_id},
+            {"credentials.instagram_user_id": ig_account_id},
+        ],
     })
     return doc["store_id"] if doc else None
 

@@ -83,7 +83,7 @@ def get_account_info(access_token: str) -> dict:
     resp = httpx.get(
         f"{_META_GRAPH_URL}/v21.0/me",
         params={
-            "fields": "id,username,account_type",
+            "fields": "id,user_id,username,account_type",
             "access_token": access_token,
         },
         timeout=30.0,

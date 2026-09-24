@@ -72,6 +72,8 @@ from app.settings.store_credentials import (
 from app.settings.store_settings import get_industry, store_exists
 from app.stores.routes import router as stores_router
 from app.inbox.stream import router as inbox_stream_router
+from app.inbox.echoes import handle_business_echo
+
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -423,6 +425,7 @@ def instagram_callback(request: Request, code: str = "", state: str = "", error:
     set_credentials(store_id, "instagram", {
         "access_token": long_token,
         "instagram_business_account_id": info["id"],
+        "instagram_user_id": str(info.get("user_id") or ""),
         "username": info.get("username", ""),
     })
 
@@ -457,13 +460,22 @@ async def instagram_webhook_receive(request: Request, background_tasks: Backgrou
 def _process_instagram_entry(entry: dict) -> None:
     for event in entry.get("messaging", []):
         message = event.get("message")
-        if not message or message.get("is_echo"):
-            continue  # echoes handled in Inbox Phase 3
-
+        if not message:
+            continue
         text = message.get("text")
         sender_id = event.get("sender", {}).get("id")
         recipient_id = event.get("recipient", {}).get("id")
         if not (text and sender_id and recipient_id):
+            continue
+
+        if message.get("is_echo"):
+            # Sent FROM the business account: sender = business, recipient = customer
+            store_id = find_store_by_ig_account(sender_id)
+            if store_id:
+                handle_business_echo(
+                    store_id, "instagram", recipient_id, text,
+                    external_message_id=message.get("mid"), app_id=message.get("app_id"),
+                )
             continue
 
         store_id = find_store_by_ig_account(recipient_id)
@@ -475,7 +487,6 @@ def _process_instagram_entry(entry: dict) -> None:
             store_id, "instagram", sender_id, text,
             external_message_id=message.get("mid"),
         )
-
 
 # ---------------------------------------------------------------------------
 # Messenger
@@ -553,17 +564,27 @@ def _process_messenger_entry(entry: dict) -> None:
 
     for event in entry.get("messaging", []):
         message = event.get("message")
-        if not message or message.get("is_echo"):
-            continue  # echoes handled in Inbox Phase 3
+        if not message:
+            continue
         text = message.get("text")
         sender_id = event.get("sender", {}).get("id")
-        if not (text and sender_id):
+        recipient_id = event.get("recipient", {}).get("id")
+        if not text:
             continue
 
-        handle_incoming_message(
-            store_id, "messenger", sender_id, text,
-            external_message_id=message.get("mid"),
-        )
+        if message.get("is_echo"):
+            if recipient_id:
+                handle_business_echo(
+                    store_id, "messenger", recipient_id, text,
+                    external_message_id=message.get("mid"), app_id=message.get("app_id"),
+                )
+            continue
+
+        if sender_id:
+            handle_incoming_message(
+                store_id, "messenger", sender_id, text,
+                external_message_id=message.get("mid"),
+            )
 
 
 # ---------------------------------------------------------------------------

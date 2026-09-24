@@ -16,7 +16,7 @@ def send_dm(store_id: str, recipient_id: str, text: str) -> SendResult:
         logger.error("No IG creds for store")
         return SendResult(ok=False, error_code="not_configured")
 
-    url = f"https://graph.instagram.com/v21.0/{creds['instagram_business_account_id']}/messages"
+    url = "https://graph.instagram.com/v21.0/me/messages"
     headers = {"Authorization": f"Bearer {creds['access_token']}"}
 
     def post(part: str) -> httpx.Response:
