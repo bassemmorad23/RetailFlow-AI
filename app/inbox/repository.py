@@ -370,3 +370,9 @@ def events_after(store_id: str, after_seq: int, limit: int = 100) -> list[dict]:
             {"store_id": store_id, "seq": {"$gt": after_seq}}, {"_id": 0}
         ).sort("seq", ASCENDING).limit(limit)
     )
+    
+    
+def latest_event_seq(store_id: str) -> int:
+    """Current last event seq for a store (0 if none yet)."""
+    doc = _db()["inbox_event_counters"].find_one({"_id": store_id})
+    return int(doc["seq"]) if doc else 0

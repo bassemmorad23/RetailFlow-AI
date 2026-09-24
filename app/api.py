@@ -71,7 +71,7 @@ from app.settings.store_credentials import (
 )
 from app.settings.store_settings import get_industry, store_exists
 from app.stores.routes import router as stores_router
-
+from app.inbox.stream import router as inbox_stream_router
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -95,6 +95,7 @@ app = FastAPI(
 app.include_router(auth_router)
 app.include_router(stores_router)
 app.include_router(inbox_router)
+app.include_router(inbox_stream_router)
 
 app.add_middleware(
     CORSMiddleware,
