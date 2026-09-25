@@ -161,7 +161,8 @@ def _shopify(store_id: str, order: dict, http: httpx.Client) -> PushResult:
                     + (f" Customer notes: {c['notes']}" if c.get("notes") else ""),
         }
         if order.get("shipping_fee") is not None:
-            payload["shippingLines"] = [{"title": "Shipping", "priceSet": money(order["shipping_fee"])}]
+            payload["shippingLines"] = [{"title": order.get("shipping_title") or "Shipping",
+                                        "priceSet": money(order["shipping_fee"])}]
 
         created = gql(_CREATE, {"order": payload, "options": {
             "inventoryBehaviour": "DECREMENT_OBEYING_POLICY", "sendReceipt": False, "sendFulfillmentReceipt": False}})
@@ -177,12 +178,11 @@ def _shopify(store_id: str, order: dict, http: httpx.Client) -> PushResult:
 
 
 # ---------------------------------------------------------------- WooCommerce
+
 def _wc_state(country: str, region_code: str) -> str:
     """WooCommerce state codes: Egypt uses 'EG' + ISO suffix (EGGZ); others the ISO suffix."""
     suffix = region_code.split("-", 1)[-1]
     return f"{country}{suffix}" if country == "EG" else suffix
-
-
 
 
 def _woocommerce(store_id: str, order: dict, http: httpx.Client) -> PushResult:

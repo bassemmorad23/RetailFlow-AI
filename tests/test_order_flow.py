@@ -29,7 +29,7 @@ def env(monkeypatch):
                                                                     stock="in_stock"),
           "shipping": ShippingSettings(method="fixed", fixed={"fee": 60}), "extract_calls": 0}
 
-    def fake_extract(text, pending_region_suggestions=None):
+    def fake_extract(text,  **kw):
         st["extract_calls"] += 1
         return st["extraction"]
 

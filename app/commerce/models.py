@@ -20,7 +20,7 @@ OrderStatus = Literal["pending_approval", "approved", "rejected", "cancelled", "
 PaymentMethod = Literal["cod"]
 CaseType = Literal["return", "exchange", "refund", "complaint", "delivery_issue", "other"]
 CaseStatus = Literal["open", "in_progress", "resolved", "closed"]
-DraftStep = Literal["collecting_items", "collecting_details", "awaiting_confirmation"]
+DraftStep = Literal["collecting_items", "collecting_details", "choosing_shipping", "awaiting_confirmation"]
 RejectReason = Literal["out_of_stock", "cannot_deliver", "suspected_fake", "other"]
 PushStatus = Literal["not_needed", "pending", "succeeded", "failed"]
 
@@ -80,8 +80,16 @@ class DraftCustomer(_Strict):
     notes: str | None = None
 
 
+class ShippingOption(_Strict):
+    handle: str
+    title: str
+    price: float
+
+
 class OrderDraft(_Strict):
     step: DraftStep = "collecting_items"
+    shipping_options: list[ShippingOption] = Field(default_factory=list)
+    shipping_choice: str | None = None  # handle of the chosen option
     items: list[OrderItem] = Field(default_factory=list, max_length=MAX_ORDER_LINES)
     customer: DraftCustomer = Field(default_factory=DraftCustomer)
     confirmation_hash: str | None = None  # hash of the exact summary the customer was shown
@@ -124,6 +132,7 @@ class Order(_Loose):
     subtotal: float
     shipping_fee: float | None          # None = merchant sets it at approval (manual / uncovered region)
     shipping_status: Literal["quoted", "pending_merchant"] = "quoted"
+    shipping_title: str | None = None
     total: float | None
     payment_method: PaymentMethod = "cod"
     status: OrderStatus

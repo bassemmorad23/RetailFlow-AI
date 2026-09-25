@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from app.commerce import workflow
 from app.commerce.customer_fields import apply_customer_details, missing_fields, to_customer_details
 from app.commerce.repository import create_order
-from app.commerce.stock import check_stock
+from app.commerce.platform_shipping import shopify_shipping_rates
+from app.commerce.stock import check_stock, store_platform
 from app.inbox import events
 from app.inbox import repository as inbox_repo
 from app.products.product_store import fetch_products
@@ -101,7 +102,9 @@ def process_order_turn(
             return OrderTurn("unavailable", UNAVAILABLE_TEXT)
 
     pending = state.draft.customer.region_suggestions if state.draft else []
-    extraction = extract_order_details(text, pending_region_suggestions=pending)
+    offered = ([f"{o.title} ({o.price:.2f})" for o in state.draft.shipping_options]
+               if state.draft and state.draft.step == "choosing_shipping" else None)
+    extraction = extract_order_details(text, pending_region_suggestions=pending, shipping_options=offered)
 
     if extraction.cancel and not starting:
         workflow.clear_draft(store_id, conversation_id, expected_version=state.version)
@@ -111,10 +114,14 @@ def process_order_turn(
     shipping = get_shipping(store_id)
     country = settings.country or "EG"
     currency = settings.currency or "EGP"
+    rates = None
+    if shipping is not None and shipping.method == "platform" and store_platform(store_id) == "shopify":
+        def rates(d):
+            return shopify_shipping_rates(store_id, d.items, d.customer, currency)
 
     if state.draft and state.draft.step == "awaiting_confirmation" and _is_confirmation(extraction, text):
         return _confirm(store_id, conversation_id, state, channel=channel,
-                        customer_external_id=customer_external_id, shipping=shipping, currency=currency)
+                        customer_external_id=customer_external_id, shipping=shipping, currency=currency, rates=rates)
 
     notes: list[str] = []
     for attempt in range(_SAVE_ATTEMPTS):
@@ -123,7 +130,7 @@ def process_order_turn(
         draft = state.draft.model_copy(deep=True) if state.draft else OrderDraft()
         notes = _apply(draft, extraction, store_id=store_id, channel=channel, sender_id=customer_external_id,
                        country=country, recommendations=recommendations)
-        summary = _finalize(draft, shipping, currency)
+        summary = _finalize(draft, shipping, currency, rates)
         if workflow.save_draft(store_id, conversation_id, draft, expected_version=state.version):
             return OrderTurn(draft.step, _state_text(draft, summary, notes, currency), draft)
         logger.info("Order draft changed concurrently; retrying", extra={"inbox_conversation": conversation_id})
@@ -155,6 +162,13 @@ def _apply(draft: OrderDraft, ex: OrderExtraction, *, store_id, channel, sender_
         else:
             notes.append(f"Could not find '{request.get('product')}' in the catalog — ask the customer to clarify. Never invent products.")
 
+    if ex.shipping_choice and draft.shipping_options:
+        handle = _match_choice(ex.shipping_choice, draft.shipping_options)
+        if handle:
+            draft.shipping_choice = handle
+        else:
+            notes.append("It wasn't clear which shipping option they chose — ask again, listing the options.")
+
     update = apply_customer_details(draft.customer, ex.customer, store_country=country,
                                     channel=channel, sender_id=sender_id)
     draft.customer = update.customer
@@ -184,7 +198,20 @@ def _merge_item(draft: OrderDraft, item: OrderItem) -> bool:
 
 # ---------------------------------------------------------------- step + summary
 
-def _finalize(draft: OrderDraft, shipping: ShippingSettings | None, currency: str) -> dict | None:
+def _match_choice(choice: str, options: list) -> str | None:
+    c = choice.strip().lower()
+    if c.isdigit() and 1 <= int(c) <= len(options):
+        return options[int(c) - 1].handle
+    for o in options:
+        if o.title.strip().lower() == c:
+            return o.handle
+    for o in options:
+        if c in o.title.lower() or o.title.lower() in c:
+            return o.handle
+    return None
+
+
+def _finalize(draft: OrderDraft, shipping: ShippingSettings | None, currency: str, rates=None) -> dict | None:
     if not draft.items:
         draft.step, draft.confirmation_hash = "collecting_items", None
         return None
@@ -193,14 +220,31 @@ def _finalize(draft: OrderDraft, shipping: ShippingSettings | None, currency: st
         return None
 
     subtotal = round(sum(i.unit_price * i.quantity for i in draft.items), 2)
-    quote = quote_shipping(shipping, country=draft.customer.country, region=draft.customer.region_code,
-                           subtotal=subtotal)  # platform rate plugs in with C4
-    total = round(subtotal + quote.fee, 2) if quote.fee is not None else None
+    fee, status, title = None, None, None
+
+    options = rates(draft) if rates else None
+    if options:
+        draft.shipping_options = options
+        if len(options) == 1:
+            draft.shipping_choice = options[0].handle
+        chosen = next((o for o in options if o.handle == draft.shipping_choice), None)
+        if chosen is None:  # several options (or the chosen one disappeared) -> customer picks
+            draft.shipping_choice, draft.step, draft.confirmation_hash = None, "choosing_shipping", None
+            return None
+        fee, status, title = chosen.price, "quoted", chosen.title
+    else:
+        draft.shipping_options, draft.shipping_choice = [], None
+        quote = quote_shipping(shipping, country=draft.customer.country, region=draft.customer.region_code,
+                               subtotal=subtotal)  # platform without rates -> configured fallback
+        fee, status = quote.fee, quote.status
+
+    total = round(subtotal + fee, 2) if fee is not None else None
     summary = {
         "items": [i.model_dump() for i in draft.items],
         "customer": draft.customer.model_dump(exclude={"region_suggestions", "phone_source"}),
         "currency": currency, "subtotal": subtotal,
-        "shipping_fee": quote.fee, "shipping_status": quote.status, "total": total, "payment": "cod",
+        "shipping_fee": fee, "shipping_status": status, "shipping_title": title,
+        "total": total, "payment": "cod",
     }
     draft.step = "awaiting_confirmation"
     draft.confirmation_hash = hashlib.sha256(json.dumps(summary, sort_keys=True, default=str).encode()).hexdigest()
@@ -226,7 +270,8 @@ def _state_text(draft: OrderDraft, summary: dict | None, notes: list[str], curre
     if draft.step == "awaiting_confirmation" and summary:
         lines.append(f"Subtotal: {_money(summary['subtotal'], currency)}")
         if summary["shipping_fee"] is not None:
-            lines.append(f"Shipping: {_money(summary['shipping_fee'], currency)}")
+            label = f"Shipping ({summary['shipping_title']})" if summary.get("shipping_title") else "Shipping"
+            lines.append(f"{label}: {_money(summary['shipping_fee'], currency)}")
             lines.append(f"Total: {_money(summary['total'], currency)}")
         else:
             lines.append("Shipping: the store will confirm the shipping fee and the final total. Do NOT state a total.")
@@ -241,6 +286,10 @@ def _state_text(draft: OrderDraft, summary: dict | None, notes: list[str], curre
             lines.append("Collected: " + "; ".join(collected))
         if draft.step == "collecting_items":
             lines.append("NEXT: ask which product (and size/colour if relevant) and how many they want.")
+        elif draft.step == "choosing_shipping":
+            lines.append("Shipping options:")
+            lines += [f"{n}. {o.title} — {_money(o.price, currency)}" for n, o in enumerate(draft.shipping_options, 1)]
+            lines.append("NEXT: list these shipping options with prices and ask which one they prefer.")
         else:
             missing = [_FIELD_LABELS[f] for f in missing_fields(c)]
             lines.append("Missing: " + ", ".join(missing))
@@ -290,11 +339,12 @@ def _revalidate(store_id: str, draft: OrderDraft, currency: str) -> list[str]:
     return notes
 
 
-def _confirm(store_id, conversation_id, state, *, channel, customer_external_id, shipping, currency) -> OrderTurn | None:
+def _confirm(store_id, conversation_id, state, *, channel, customer_external_id, shipping, currency,
+             rates=None) -> OrderTurn | None:
     draft = state.draft.model_copy(deep=True)
     confirmed_hash = draft.confirmation_hash
     notes = _revalidate(store_id, draft, currency)
-    summary = _finalize(draft, shipping, currency)
+    summary = _finalize(draft, shipping, currency, rates)
 
     if summary is None or draft.confirmation_hash != confirmed_hash:
         notes.insert(0, "Something changed since the summary (price or availability). Explain it, show the "
@@ -308,6 +358,7 @@ def _confirm(store_id, conversation_id, state, *, channel, customer_external_id,
         customer=to_customer_details(draft.customer), items=draft.items, currency=currency,
         shipping_fee=summary["shipping_fee"], conversation_id=conversation_id,
         idempotency_key=f"{conversation_id}:{confirmed_hash}",
+        shipping_title=summary.get("shipping_title"),
     )
     workflow.clear_draft(store_id, conversation_id, expected_version=state.version)
     _notify_merchant(store_id, conversation_id, order)

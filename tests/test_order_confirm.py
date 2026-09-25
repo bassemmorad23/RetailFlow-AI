@@ -29,7 +29,7 @@ def _item(qty=2):
 def env(monkeypatch):
     st = {"price": 320.0, "stock": "in_stock", "extraction": OrderExtraction(),
           "shipping": ShippingSettings(method="fixed", fixed={"fee": 60})}
-    monkeypatch.setattr(flow, "extract_order_details", lambda text, pending_region_suggestions=None: st["extraction"])
+    monkeypatch.setattr(flow, "extract_order_details", lambda text, **kw: st["extraction"])
     monkeypatch.setattr(flow, "resolve_item", lambda sid, req, recs: ResolvedItem(
         "ok", item=_item(req.get("quantity") or 2), product_name="Cotton T-Shirt", stock="in_stock"))
     monkeypatch.setattr(flow, "get_shipping", lambda sid: st["shipping"])

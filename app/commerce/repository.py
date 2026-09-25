@@ -78,6 +78,7 @@ def create_order(
     shipping_fee: float | None,
     idempotency_key: str,
     conversation_id: str | None = None,
+    shipping_title: str | None = None,
 ) -> dict:
     """Create a pending_approval COD order, or return the existing one for this idempotency key."""
     if not items:
@@ -104,6 +105,7 @@ def create_order(
         "subtotal": subtotal,
         "shipping_fee": shipping,
         "shipping_status": "quoted" if shipping is not None else "pending_merchant",
+        "shipping_title": shipping_title,
         "total": _money(subtotal + shipping) if shipping is not None else None,
         "payment_method": "cod",
         "status": "pending_approval",
