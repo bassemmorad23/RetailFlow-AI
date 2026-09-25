@@ -18,6 +18,10 @@ from app.schemas.models import Product , Variant
 from app.ingestion.stock_parser import aggregate_status, parse_stock
 
 
+def _as_str(value) -> str | None:
+    return str(value) if value not in (None, "") else None
+
+
 def to_canonical(
     raw_row: dict[str, Any],
     mapping: MappingResult,
@@ -49,7 +53,8 @@ def to_canonical(
     product_data["stock_quantity"] = qty
     product_data["stock_available"] = status == "in_stock"  # legacy field, no longer trusted
     
-    
+    product_data["external_id"] = _as_str(raw_row.get("external_id"))
+    product_data["external_parent_id"] = _as_str(raw_row.get("external_parent_id"))
     
 
     # 2. Industry canonical fields — normalize before storing
@@ -208,6 +213,7 @@ def _build_variant_product(
             attributes={k: cr_dump["attributes"].get(k) for k in variant_attrs if k in cr_dump["attributes"]},
             specifications={k: cr_dump["specifications"].get(k) for k in variant_specs if k in cr_dump["specifications"]},
             image_url=cr.image_url,
+            external_id=cr.external_id,
         )
         variants.append(variant)
         
@@ -215,6 +221,7 @@ def _build_variant_product(
     parent_data["stock_quantity"] = None
     parent_data["stock_available"] = parent_data["stock_status"] == "in_stock"
     parent_data["variants"] = [v.model_dump() for v in variants]
+    parent_data["external_id"] = None  # variants carry their own ids
 
     try:
         return Product(**parent_data)

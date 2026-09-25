@@ -56,7 +56,9 @@ def ingest_products(
     all_keys: set[str] = set()
     for row in rows:
         all_keys.update(row.keys())
-        
+    
+    
+    all_keys = {k for k in all_keys if not k.startswith("external_")}
     mapping = map_columns(sorted(all_keys), industry_id)
     result.unmapped_columns = mapping.unmapped
     result.conflict_columns = mapping.conflicts

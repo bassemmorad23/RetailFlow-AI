@@ -183,6 +183,7 @@ class Variant(BaseModel):
         default=None, ge=0,
         description="Synced quantity when the platform tracks inventory. Never shown to customers.",
     )
+    external_id: str | None = Field(default=None, description="Platform id of this variant (Shopify variant GID / WooCommerce variation id).")
     
     attributes: dict[str, Any] = Field(
         default_factory=dict,
@@ -324,6 +325,8 @@ class Product(BaseModel):
         default=None, ge=0,
         description="Synced quantity when the platform tracks inventory. Never shown to customers.",
     )
+    external_id: str | None = Field(default=None, description="Platform id for live stock of a simple product.")
+    external_parent_id: str | None = Field(default=None, description="Platform parent id (Shopify product GID / WooCommerce parent product id).")
     
     image_url: Optional[str] = None
 

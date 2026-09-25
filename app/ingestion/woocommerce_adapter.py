@@ -182,6 +182,9 @@ def _flatten_product(raw: dict) -> dict:
     elif raw.get("id"):
         flat["product_id"] = str(raw["id"])
 
+    
+    flat["external_id"] = str(raw["id"]) if raw.get("id") is not None else None
+    flat["external_parent_id"] = None
     flat["stock"] = _wc_stock(raw)
     return flat
 
@@ -222,6 +225,10 @@ def _flatten_variation(parent: dict, variation: dict) -> dict:
             if name and option:
                 flat[name] = option
 
+    
+    
+    flat["external_id"] = str(variation["id"]) if variation.get("id") is not None else None
+    flat["external_parent_id"] = str(parent["id"]) if parent.get("id") is not None else None
     return flat
 
 

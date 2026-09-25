@@ -177,6 +177,8 @@ def _flatten_product_with_variants(product: dict) -> list[dict]:
             "price": v.get("price"),
             "sku": v.get("sku") or v.get("id", "").split("/")[-1],
             "stock": _shopify_stock(v),
+            "external_id": v.get("id"),
+            "external_parent_id": product.get("id"),
         }
 
         # Variant image OR parent image fallback
