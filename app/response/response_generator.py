@@ -207,6 +207,7 @@ def generate_response(
     industry_id: str | None,
     comparison: "ComparisonResult | None" = None,
     summary: str | None = None,
+    order_state: str | None = None,
 ) -> str:
     """
     Build the prompt and call the model chain in order. The first model
@@ -227,6 +228,7 @@ def generate_response(
             retrieved_context=retrieved_context,
             recommendations=recommendations,
             summary=summary,
+            order_state=order_state,
         )
 
     for model in settings.response_model_chain:
@@ -348,6 +350,7 @@ def _build_user_prompt(
     retrieved_context: Iterable[RetrievedChunk],
     recommendations: Iterable[ProductRecommendation],
     summary: str | None = None,
+    order_state: str | None = None,
 ) -> str:
     lines: list[str] = []
 
@@ -384,6 +387,10 @@ def _build_user_prompt(
             lines.append(
                 f"- {rec.name}{variant_txt} (price: {rec.price}) — Stock: {stock_label(rec.stock)}. {rec.reason}"
             )
+            
+            
+    if order_state:
+        lines.append("\n" + order_state)
 
     lines.append(f"<customer_message>\n{message.text}\n</customer_message>")
     lines.append("\nYour reply:")

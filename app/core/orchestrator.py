@@ -74,7 +74,7 @@ from app.schemas.models import (
     KnownFacts,
     MemoryState,
 )
-
+from app.commerce.order_flow import process_order_turn
 
 
 logger = logging.getLogger(__name__)
@@ -241,6 +241,21 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
         recommendations,
     )
 
+    # Order draft: starts on ready_to_buy, continues whatever the intent.
+    order_turn = _time_step(
+        "order_flow",
+        lambda: process_order_turn(
+            store_id=message.store_id,
+            conversation_id=message.conversation_id,
+            channel=message.channel,
+            customer_external_id=message.customer_id,
+            text=message.text,
+            intent=intent,
+            recommendations=recommendations,
+        ),
+        None,
+    )
+
     # Comparison flow: intercept COMPARE_PRODUCTS intent (confidence-gated)
     # to prevent BART false positives from hijacking the response.
     comparison: ComparisonResult | None = None
@@ -255,6 +270,9 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
             ),
             None,
         )
+        
+        
+        
 
     reply_text = _time_step(
         "response_generation",
@@ -268,6 +286,7 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
             industry_id=industry_id,
             comparison=comparison,
             summary=context.summary if context else None,
+            order_state=order_turn.state_text if order_turn else None,
         ),
         PIPELINE_ERROR_REPLY,
     )
