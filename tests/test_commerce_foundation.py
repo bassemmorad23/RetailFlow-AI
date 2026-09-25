@@ -11,8 +11,8 @@ from app.commerce import workflow
 from app.commerce.models import MAX_ORDER_LINES, CustomerDetails, OrderDraft, OrderItem
 from app.inbox import repository as inbox_repo
 
-CUSTOMER = CustomerDetails(name="Sara", phone="01000000000", governorate="Cairo",
-                           city="Nasr City", address_line="12 Abbas St")
+CUSTOMER = CustomerDetails(name="Sara", phone="+201000000000", country="EG", region_code="EG-C",
+                           region_name="Cairo", city="Nasr City", address_line="12 Abbas St")
 
 
 def _store() -> str:

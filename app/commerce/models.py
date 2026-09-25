@@ -55,8 +55,10 @@ class OrderItem(_Strict):
 
 class CustomerDetails(_Strict):
     name: str = Field(min_length=1, max_length=100)
-    phone: str = Field(min_length=5, max_length=20)
-    governorate: str = Field(min_length=1, max_length=50)
+    phone: str = Field(min_length=8, max_length=16, description="E.164, e.g. +201012345678")
+    country: str = Field(min_length=2, max_length=2)
+    region_code: str = Field(min_length=2, max_length=10, description="ISO 3166-2, e.g. EG-GZ")
+    region_name: str = Field(min_length=1, max_length=80)
     city: str = Field(min_length=1, max_length=80)
     address_line: str = Field(min_length=1, max_length=300)
     notes: str = Field(default="", max_length=500)
@@ -66,7 +68,11 @@ class DraftCustomer(_Strict):
     """Partially collected details during the conversation."""
     name: str | None = None
     phone: str | None = None
-    governorate: str | None = None
+    phone_source: Literal["customer", "channel"] | None = None
+    country: str | None = None
+    region_code: str | None = None
+    region_name: str | None = None
+    region_suggestions: list[str] = Field(default_factory=list)  # "Did you mean ...?" pending
     city: str | None = None
     address_line: str | None = None
     notes: str | None = None
