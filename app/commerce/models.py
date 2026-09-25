@@ -89,7 +89,7 @@ class ShippingOption(_Strict):
 class OrderDraft(_Strict):
     step: DraftStep = "collecting_items"
     shipping_options: list[ShippingOption] = Field(default_factory=list)
-    shipping_choice: str | None = None  # handle of the chosen option
+    shipping_choice: str | None = None  # title of the chosen option (handles can change between calls)
     items: list[OrderItem] = Field(default_factory=list, max_length=MAX_ORDER_LINES)
     customer: DraftCustomer = Field(default_factory=DraftCustomer)
     confirmation_hash: str | None = None  # hash of the exact summary the customer was shown

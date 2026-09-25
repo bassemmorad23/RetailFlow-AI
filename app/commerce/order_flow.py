@@ -200,14 +200,18 @@ def _merge_item(draft: OrderDraft, item: OrderItem) -> bool:
 
 def _match_choice(choice: str, options: list) -> str | None:
     c = choice.strip().lower()
+
     if c.isdigit() and 1 <= int(c) <= len(options):
-        return options[int(c) - 1].handle
+        return options[int(c) - 1].title
+
     for o in options:
         if o.title.strip().lower() == c:
-            return o.handle
+            return o.title
+
     for o in options:
         if c in o.title.lower() or o.title.lower() in c:
-            return o.handle
+            return o.title
+
     return None
 
 
@@ -226,8 +230,8 @@ def _finalize(draft: OrderDraft, shipping: ShippingSettings | None, currency: st
     if options:
         draft.shipping_options = options
         if len(options) == 1:
-            draft.shipping_choice = options[0].handle
-        chosen = next((o for o in options if o.handle == draft.shipping_choice), None)
+            draft.shipping_choice = options[0].title
+        chosen = next((o for o in options if o.title == draft.shipping_choice), None)
         if chosen is None:  # several options (or the chosen one disappeared) -> customer picks
             draft.shipping_choice, draft.step, draft.confirmation_hash = None, "choosing_shipping", None
             return None
