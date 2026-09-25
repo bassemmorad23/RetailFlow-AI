@@ -182,6 +182,9 @@ def _call_single_model(model: str, prompt: str, system_prompt: str) -> tuple[str
         raise ValueError(f"Model {model} returned no choices in response.")
 
     reply_text = response.choices[0].message.content.strip()
+    low = reply_text.strip().lower()
+    if low.startswith(("user safety", "safe\n", "unsafe")) or "safety categories" in low:
+        raise APIError(f"Model {model} returned a moderation label, not a reply", request=None, body=None)
 
     usage: dict = {}
     if response.usage is not None:

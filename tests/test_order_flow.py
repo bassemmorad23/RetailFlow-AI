@@ -154,3 +154,25 @@ def test_cancel_clears_draft(env):
     t = _turn(sid, cid, intent=OTHER)
     assert t.event == "cancelled"
     assert flow.workflow.load_draft(sid, cid).draft is None
+    
+
+
+
+
+def _i(label, conf=0.9):
+    return IntentResult(label=label, confidence=conf)
+
+
+@pytest.mark.parametrize("text,intent,expected", [
+    ("I want to buy it in size L, 2 pieces", _i(IntentLabel.ASKING_DETAILS, 0.24), True),
+    ("I'd like to order 2", _i(IntentLabel.OTHER), True),
+    ("عايز اشتري التيشيرت ده", _i(IntentLabel.OTHER), True),
+    ("3ayez ashtery el tshirt", _i(IntentLabel.OTHER), True),
+    ("ok", _i(IntentLabel.READY_TO_BUY, 0.8), True),
+    ("hmm", _i(IntentLabel.READY_TO_BUY, 0.3), False),
+    ("Where is my order?", _i(IntentLabel.ORDER_STATUS), False),
+    ("I want to return what I bought", _i(IntentLabel.COMPLAINT), False),
+    ("How much is this?", _i(IntentLabel.ASKING_PRICE), False),
+])
+def test_wants_to_start(text, intent, expected):
+    assert flow.wants_to_start(intent, text) is expected

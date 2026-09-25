@@ -24,6 +24,7 @@ from app.commerce.order_extractor import OrderExtraction, extract_order_details
 from app.commerce.shipping import ShippingSettings, quote_shipping
 from app.schemas.models import IntentLabel, IntentResult, ProductRecommendation
 from app.settings.store_settings import get_settings, get_shipping
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,30 @@ UNAVAILABLE_TEXT = (
     "Do not collect order details and do not promise prices for shipping."
 )
 CANCELLED_TEXT = "ORDER CANCELLED: the customer cancelled the order in progress. Confirm briefly and offer further help."
+
+
+_BUY_PHRASES = re.compile(
+    r"\b(buy|purchase|i'?ll take|want to order|like to order|place an order|order (it|this|one|them|\d+)|checkout)\b"
+    r"|اشتري|أشتري|هشتري|هاشتري|اطلب|أطلب|هاخد|هاخده|عايز اخد|\b(ashtery|ashteri|a4tery|hakhod|a5od)\b",
+    re.IGNORECASE,
+)
+
+_NEVER_START = {IntentLabel.ORDER_STATUS, IntentLabel.COMPLAINT}
+
+
+def wants_to_start(intent: IntentResult, text: str) -> bool:
+    if intent.label in _NEVER_START:
+        return False
+
+    if intent.label == IntentLabel.READY_TO_BUY and intent.confidence >= START_CONFIDENCE:
+        return True
+
+    return bool(_BUY_PHRASES.search(text or ""))
+
+
+
+
+
 
 
 @dataclass
@@ -66,7 +91,7 @@ def process_order_turn(
 
     starting = state.draft is None
     if starting:
-        if intent.label != IntentLabel.READY_TO_BUY or intent.confidence < START_CONFIDENCE:
+        if not wants_to_start(intent, text):
             return None
         if get_shipping(store_id) is None:
             return OrderTurn("unavailable", UNAVAILABLE_TEXT)

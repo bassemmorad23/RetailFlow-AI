@@ -6,6 +6,7 @@ _CANDIDATE_LABEL_TO_ENUM = {
     "The customer is browsing products without asking for a specific product or action.": IntentLabel.BROWSING,
 
     "The customer is asking about the price or cost of a product.": IntentLabel.ASKING_PRICE,
+    "The customer says they want to buy or order a specific product, possibly with size, colour or quantity.": IntentLabel.READY_TO_BUY,
 
     "The customer is asking whether a product, size, color, or variant is available.": IntentLabel.ASKING_AVAILABILITY,
 
