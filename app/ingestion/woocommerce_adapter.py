@@ -182,6 +182,7 @@ def _flatten_product(raw: dict) -> dict:
     elif raw.get("id"):
         flat["product_id"] = str(raw["id"])
 
+    flat["stock"] = _wc_stock(raw)
     return flat
 
 
@@ -210,8 +211,8 @@ def _flatten_variation(parent: dict, variation: dict) -> dict:
         flat["price"] = variation["regular_price"]
     elif variation.get("price"):
         flat["price"] = variation["price"]
-    if variation.get("stock_status"):
-        flat["stock_status"] = variation["stock_status"]
+    
+    flat["stock"] = _wc_stock(variation)
 
     # Flatten variation's attributes (Size, Color, etc.)
     for attr in variation.get("attributes", []):
@@ -222,3 +223,11 @@ def _flatten_variation(parent: dict, variation: dict) -> dict:
                 flat[name] = option
 
     return flat
+
+
+def _wc_stock(obj: dict):
+    """Managed stock -> real quantity; otherwise the stock status; no data -> None."""
+    if obj.get("manage_stock") and obj.get("stock_quantity") is not None:
+        return max(int(obj["stock_quantity"]), 0)
+    return {"instock": "in stock", "outofstock": "out of stock",
+            "onbackorder": "in stock"}.get(obj.get("stock_status"))

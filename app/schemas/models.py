@@ -175,6 +175,15 @@ class Variant(BaseModel):
     sku: str = Field(min_length=1, description="Unique identifier per variant.")
     price: float = Field(ge=0, description="Variant's price. May differ from parent.")
     stock_available: bool = Field(default=True, description="Whether variant is in stock.")
+    stock_status: Literal["in_stock", "out_of_stock", "unknown"] = Field(
+        default="unknown",
+        description="Synced stock status. 'unknown' = no stock data; never shown as available.",
+    )
+    stock_quantity: int | None = Field(
+        default=None, ge=0,
+        description="Synced quantity when the platform tracks inventory. Never shown to customers.",
+    )
+    
     attributes: dict[str, Any] = Field(
         default_factory=dict,
         description="Soft attributes like color, size — canonical field names.",
@@ -306,6 +315,16 @@ class Product(BaseModel):
     # ---- Stock + media ----
 
     stock_available: bool = True
+    
+    stock_status: Literal["in_stock", "out_of_stock", "unknown"] = Field(
+        default="unknown",
+        description="Synced stock status. 'unknown' = no stock data; never shown as available.",
+    )
+    stock_quantity: int | None = Field(
+        default=None, ge=0,
+        description="Synced quantity when the platform tracks inventory. Never shown to customers.",
+    )
+    
     image_url: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")

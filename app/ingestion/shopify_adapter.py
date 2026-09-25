@@ -44,6 +44,10 @@ query getProducts($first: Int!, $cursor: String) {
               price
               compareAtPrice
               inventoryQuantity
+              inventoryPolicy
+              inventoryItem {
+                tracked
+              }
               selectedOptions {
                 name
                 value
@@ -172,7 +176,7 @@ def _flatten_product_with_variants(product: dict) -> list[dict]:
             "product_type": product.get("productType"),
             "price": v.get("price"),
             "sku": v.get("sku") or v.get("id", "").split("/")[-1],
-            "stock": (v.get("inventoryQuantity") or 0) > 0,
+            "stock": _shopify_stock(v),
         }
 
         # Variant image OR parent image fallback
@@ -190,3 +194,18 @@ def _flatten_product_with_variants(product: dict) -> list[dict]:
         rows.append(row)
 
     return rows
+  
+  
+
+def _shopify_stock(variant: dict):
+    """
+    Tracked -> real quantity. Not tracked, or 'continue selling when out
+    of stock' -> in stock. No data -> None (unknown).
+    """
+    if variant.get("inventoryPolicy") == "CONTINUE":
+        return "in stock"
+    tracked = (variant.get("inventoryItem") or {}).get("tracked")
+    if tracked is False:
+        return "in stock"
+    qty = variant.get("inventoryQuantity")
+    return None if qty is None else max(int(qty), 0)

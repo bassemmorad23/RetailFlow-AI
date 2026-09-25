@@ -49,6 +49,12 @@ _BUILTIN_ALIASES: dict[str, str] = {
     "in_stock": "stock_available",
     "available": "stock_available",
     "availability": "stock_available",
+    "quantity": "stock_available",
+    "qty": "stock_available",
+    "inventory": "stock_available",
+    "الكمية": "stock_available",
+    "المخزون": "stock_available",
+    "متوفر": "stock_available",
 
     # image
     "image": "image_url",

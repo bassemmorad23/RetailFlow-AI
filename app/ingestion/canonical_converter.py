@@ -15,6 +15,7 @@ from app.industries.registry import get_field
 from app.ingestion.deterministic_mapper import MappingResult
 from app.ingestion.normalizer import normalize
 from app.schemas.models import Product , Variant
+from app.ingestion.stock_parser import aggregate_status, parse_stock
 
 
 def to_canonical(
@@ -41,6 +42,15 @@ def to_canonical(
             value = raw_row[source_col]
             if value is not None and str(value).strip():
                 product_data[product_field] = value
+                
+    # Stock: interpret whatever the source gave; missing -> unknown (never "available")
+    status, qty = parse_stock(product_data.pop("stock_available", None))
+    product_data["stock_status"] = status
+    product_data["stock_quantity"] = qty
+    product_data["stock_available"] = status == "in_stock"  # legacy field, no longer trusted
+    
+    
+    
 
     # 2. Industry canonical fields — normalize before storing
     for source_col, canonical_name in mapping.mapped.items():
@@ -86,7 +96,7 @@ def to_canonical(
 # Fields that never become variant attributes (always parent-level or per-variant slot).
 _NEVER_VARIANT_ATTR = {"product_id", "name", "description", "sku"}
 # Fields that live directly on Variant (not in attributes dict).
-_VARIANT_SLOT_FIELDS = {"price", "stock_available", "image_url"}
+_VARIANT_SLOT_FIELDS = {"price", "stock_available", "stock_status", "stock_quantity", "image_url"}
 
 
 def to_canonical_grouped(
@@ -192,13 +202,18 @@ def _build_variant_product(
         variant = Variant(
             sku=sku,
             price=cr.price,
-            stock_available=cr.stock_available if cr.stock_available is not None else True,
+            stock_available=cr.stock_status == "in_stock",
+            stock_status=cr.stock_status,
+            stock_quantity=cr.stock_quantity,
             attributes={k: cr_dump["attributes"].get(k) for k in variant_attrs if k in cr_dump["attributes"]},
             specifications={k: cr_dump["specifications"].get(k) for k in variant_specs if k in cr_dump["specifications"]},
             image_url=cr.image_url,
         )
         variants.append(variant)
-
+        
+    parent_data["stock_status"] = aggregate_status([v.stock_status for v in variants])
+    parent_data["stock_quantity"] = None
+    parent_data["stock_available"] = parent_data["stock_status"] == "in_stock"
     parent_data["variants"] = [v.model_dump() for v in variants]
 
     try:
