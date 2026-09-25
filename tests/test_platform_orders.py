@@ -131,7 +131,7 @@ def test_woocommerce_creates_cod_processing_order(catalog):
     assert (b["payment_method"], b["status"], b["set_paid"]) == ("cod", "processing", False)
     assert b["line_items"] == [{"quantity": 2, "subtotal": "640.00", "total": "640.00", "product_id": 20, "variation_id": 21}]
     assert b["shipping_lines"][0]["total"] == "60.00"
-    assert b["billing"]["state"] == "GZ" and b["billing"]["phone"] == "+201012345678"
+    assert b["billing"]["state"] == "EGGZ" and b["billing"]["phone"] == "+201012345678"
     assert {"key": "storeflow_order_number", "value": "SF-1001"} in b["meta_data"]
 
 

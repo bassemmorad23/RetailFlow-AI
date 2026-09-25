@@ -177,6 +177,13 @@ def _shopify(store_id: str, order: dict, http: httpx.Client) -> PushResult:
 
 
 # ---------------------------------------------------------------- WooCommerce
+def _wc_state(country: str, region_code: str) -> str:
+    """WooCommerce state codes: Egypt uses 'EG' + ISO suffix (EGGZ); others the ISO suffix."""
+    suffix = region_code.split("-", 1)[-1]
+    return f"{country}{suffix}" if country == "EG" else suffix
+
+
+
 
 def _woocommerce(store_id: str, order: dict, http: httpx.Client) -> PushResult:
     creds = get_credentials(store_id, "woocommerce")
@@ -189,7 +196,7 @@ def _woocommerce(store_id: str, order: dict, http: httpx.Client) -> PushResult:
     c = order["customer"]
     first, last = _split_name(c["name"])
     address = {"first_name": first, "last_name": last, "address_1": c["address_line"], "city": c["city"],
-               "state": c["region_code"].split("-", 1)[-1], "country": c["country"], "phone": c["phone"]}
+               "state": _wc_state(c["country"], c["region_code"]), "country": c["country"], "phone": c["phone"]}
 
     line_items = []
     try:
