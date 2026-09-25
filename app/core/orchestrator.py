@@ -62,7 +62,7 @@ from app.billing.usage import check_usage, record_ai_message
 from app.response.response_generator import FALLBACK_REPLY
 from app.inbox.summary import ConversationContext
 from app.memory.fact_extractor import extract_facts, merge_facts
-
+from app.commerce.stock import attach_stock
 
 from app.schemas.models import (
     AgentReply,
@@ -231,6 +231,14 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
             industry_id=industry_id,
         ),
         [],
+    )
+    
+    # Live/synced stock for each recommendation. On failure: unchanged, and
+    # every recommendation stays "unknown" (never shown as available).
+    recommendations = _time_step(
+        "stock_check",
+        lambda: attach_stock(message.store_id, recommendations),
+        recommendations,
     )
 
     # Comparison flow: intercept COMPARE_PRODUCTS intent (confidence-gated)

@@ -340,6 +340,7 @@ class ProductRecommendation(BaseModel):
     name: str
     price: float
     reason: str
+    stock: Literal["in_stock", "low_stock", "out_of_stock", "unknown"] = "unknown"
 
     # NEW — populated when a specific variant matches
     variant_sku: str | None = Field(

@@ -96,6 +96,16 @@ FALLBACK_REPLY = (
     "I'm sorry, I'm having trouble responding right now. "
     "Please try again in a moment."
 )
+_STOCK_LABELS = {
+    "in_stock": "in stock",
+    "low_stock": "in stock, only a few left",
+    "out_of_stock": "OUT OF STOCK — do not offer it as available; suggest an alternative",
+    "unknown": "availability not confirmed — do not say it is available; offer to confirm",
+}
+
+
+def stock_label(level: str) -> str:
+    return _STOCK_LABELS.get(level, _STOCK_LABELS["unknown"])
 
 _client = OpenAI(
     base_url=_OPENROUTER_BASE_URL,
@@ -371,7 +381,9 @@ def _build_user_prompt(
         for rec in rec_lines:
             variant = ", ".join(f"{k}: {v}" for k, v in rec.variant_attrs.items())
             variant_txt = f" [{variant}]" if variant else ""
-            lines.append(f"- {rec.name}{variant_txt} (price: {rec.price}) — {rec.reason}")
+            lines.append(
+                f"- {rec.name}{variant_txt} (price: {rec.price}) — Stock: {stock_label(rec.stock)}. {rec.reason}"
+            )
 
     lines.append(f"<customer_message>\n{message.text}\n</customer_message>")
     lines.append("\nYour reply:")
