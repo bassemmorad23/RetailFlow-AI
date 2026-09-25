@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.auth.dependencies import get_current_user_id, require_store_member
 from app.auth.repository import add_store_member
 from app.settings.store_settings import create_store, get_settings
+from app.commerce.shipping import ShippingSettings
+from app.settings.store_credentials import get_credentials
+from app.settings.store_settings import get_shipping, set_shipping
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/stores", tags=["stores"])
@@ -49,3 +52,31 @@ def create_store_endpoint(body: CreateStoreRequest, user_id: str = Depends(get_c
 @router.get("/{store_id}")
 def get_store_endpoint(store_id: str = Depends(require_store_member)) -> dict:
     return _public_store(get_settings(store_id))
+
+
+
+@router.get("/{store_id}/shipping")
+def get_shipping_endpoint(store_id: str = Depends(require_store_member)) -> dict:
+    cfg = get_shipping(store_id)
+    return {"configured": cfg is not None, "settings": cfg.model_dump() if cfg else None}
+
+
+@router.put("/{store_id}/shipping")
+def put_shipping_endpoint(
+    body: ShippingSettings,
+    store_id: str = Depends(require_store_member),
+) -> dict:
+
+    if body.method == "platform" and not (
+        get_credentials(store_id, "shopify")
+        or get_credentials(store_id, "woocommerce")
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Platform shipping needs a connected Shopify or WooCommerce store. "
+                   "Choose rules, fixed or manual.",
+        )
+
+    set_shipping(store_id, body)
+
+    return {"configured": True, "settings": body.model_dump()}

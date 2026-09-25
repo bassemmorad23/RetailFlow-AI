@@ -1020,7 +1020,7 @@ class StoreSettings(BaseModel):
     display_name: str = Field(default="", max_length=100, description="Store name shown to the merchant.")
     country: str | None = Field(default=None, description="ISO 3166-1 alpha-2, e.g. EG.")
     currency: str | None = Field(default=None, description="ISO 4217, e.g. EGP.")
-    
+    shipping: dict | None = Field(default=None, description="ShippingSettings chosen at setup; None = not configured.")
     
 
     plan: str = Field(

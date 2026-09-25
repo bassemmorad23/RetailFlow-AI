@@ -30,8 +30,7 @@ from pymongo.collection import Collection
 from app.config import settings
 
 
-_SHOPIFY_SCOPES = "read_products"  # comma-separated if multiple
-
+_SHOPIFY_SCOPES = "read_products,read_inventory,read_orders,write_orders"
 
 @lru_cache(maxsize=1)
 def _get_state_collection() -> Collection:

@@ -20,6 +20,9 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 
 from app.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _WEBHOOK_PATHS = {"/instagram/webhook", "/messenger/webhook", "/whatsapp/webhook"}

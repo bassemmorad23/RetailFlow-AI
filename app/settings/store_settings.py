@@ -198,3 +198,17 @@ def create_store(
 def store_exists(store_id: str) -> bool:
     """True if the store has a settings document. Never creates one."""
     return _get_collection().count_documents({"store_id": store_id}, limit=1) > 0
+
+
+
+from app.commerce.shipping import ShippingSettings
+
+
+def get_shipping(store_id: str) -> ShippingSettings | None:
+    raw = get_settings(store_id).shipping
+    return ShippingSettings(**raw) if raw else None
+
+
+def set_shipping(store_id: str, cfg: ShippingSettings) -> None:
+    get_settings(store_id)  # ensure the document exists
+    _get_collection().update_one({"store_id": store_id}, {"$set": {"shipping": cfg.model_dump()}})

@@ -64,12 +64,16 @@ def ingest_products(
     result.conflict_columns = mapping.conflicts
     
     # AI-assisted mapping: try to resolve unmapped columns via LLM
-    if mapping.unmapped and industry_id is not None:
+    if mapping.unmapped and industry_id is not None and adapter.get_source_name() == "csv":
         ai_mappings = ai_map_columns(mapping.unmapped, rows, industry_id)
         if ai_mappings:
             builtin_targets = {"product_id", "name", "description", "price", "category", "image_url"}
             # Add AI-resolved mappings into the existing mapping
             for src, tgt in ai_mappings.items():
+                
+                if tgt in mapping.builtin.values():
+                    continue  # never override an already-mapped built-in
+                
                 if tgt in builtin_targets:
                     mapping.builtin[src] = tgt
                 else:
