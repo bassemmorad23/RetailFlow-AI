@@ -62,7 +62,7 @@ def _next_number(store_id: str, kind: str) -> int:
 
 
 def _money(value: float) -> float:
-    return round(float(value) + 0.0, 2)
+    return round(float(value), 2)
 
 
 # ---------------------------------------------------------------- orders
@@ -75,7 +75,7 @@ def create_order(
     customer: CustomerDetails,
     items: list[OrderItem],
     currency: str,
-    shipping_fee: float,
+    shipping_fee: float | None,
     idempotency_key: str,
     conversation_id: str | None = None,
 ) -> dict:
@@ -89,7 +89,7 @@ def create_order(
         return existing
 
     subtotal = _money(sum(i.unit_price * i.quantity for i in items))
-    shipping = _money(shipping_fee)
+    shipping = _money(shipping_fee) if shipping_fee is not None else None
     now = _now()
     doc = {
         "id": f"ord_{uuid.uuid4().hex}",
@@ -103,7 +103,8 @@ def create_order(
         "currency": currency,
         "subtotal": subtotal,
         "shipping_fee": shipping,
-        "total": _money(subtotal + shipping),
+        "shipping_status": "quoted" if shipping is not None else "pending_merchant",
+        "total": _money(subtotal + shipping) if shipping is not None else None,
         "payment_method": "cod",
         "status": "pending_approval",
         "status_history": [{"status": "pending_approval", "at": now, "by": "customer"}],

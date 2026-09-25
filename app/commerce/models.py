@@ -108,8 +108,9 @@ class Order(_Loose):
     items: list[OrderItem]
     currency: str
     subtotal: float
-    shipping_fee: float
-    total: float
+    shipping_fee: float | None          # None = merchant sets it at approval (manual / uncovered region)
+    shipping_status: Literal["quoted", "pending_merchant"] = "quoted"
+    total: float | None
     payment_method: PaymentMethod = "cod"
     status: OrderStatus
     status_history: list[StatusChange]

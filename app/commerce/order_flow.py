@@ -14,21 +14,33 @@ stock, shipping and totals come from the system. The AI receives an
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 from app.commerce import workflow
-from app.commerce.customer_fields import apply_customer_details, missing_fields
+from app.commerce.customer_fields import apply_customer_details, missing_fields, to_customer_details
+from app.commerce.repository import create_order
+from app.commerce.stock import check_stock
+from app.inbox import events
+from app.inbox import repository as inbox_repo
+from app.products.product_store import fetch_products
 from app.commerce.item_resolver import resolve_item
 from app.commerce.models import MAX_ORDER_LINES, OrderDraft, OrderItem
 from app.commerce.order_extractor import OrderExtraction, extract_order_details
 from app.commerce.shipping import ShippingSettings, quote_shipping
 from app.schemas.models import IntentLabel, IntentResult, ProductRecommendation
 from app.settings.store_settings import get_settings, get_shipping
-import re
 
 logger = logging.getLogger(__name__)
 
 START_CONFIDENCE = 0.5
+
+_BUY_PHRASES = re.compile(
+    r"\b(buy|purchase|i'?ll take|want to order|like to order|place an order|order (it|this|one|them|\d+)|checkout)\b"
+    r"|اشتري|أشتري|هشتري|هاشتري|اطلب|أطلب|هاخد|هاخده|عايز اخد|\b(ashtery|ashteri|a4tery|hakhod|a5od)\b",
+    re.IGNORECASE,
+)
+_NEVER_START = {IntentLabel.ORDER_STATUS, IntentLabel.COMPLAINT}
 _SAVE_ATTEMPTS = 3
 _FIELD_LABELS = {"name": "full name", "phone": "phone number", "region_code": "region / governorate",
                  "city": "city or area", "address_line": "delivery address"}
@@ -41,38 +53,30 @@ UNAVAILABLE_TEXT = (
 CANCELLED_TEXT = "ORDER CANCELLED: the customer cancelled the order in progress. Confirm briefly and offer further help."
 
 
-_BUY_PHRASES = re.compile(
-    r"\b(buy|purchase|i'?ll take|want to order|like to order|place an order|order (it|this|one|them|\d+)|checkout)\b"
-    r"|اشتري|أشتري|هشتري|هاشتري|اطلب|أطلب|هاخد|هاخده|عايز اخد|\b(ashtery|ashteri|a4tery|hakhod|a5od)\b",
-    re.IGNORECASE,
-)
-
-_NEVER_START = {IntentLabel.ORDER_STATUS, IntentLabel.COMPLAINT}
-
-
-def wants_to_start(intent: IntentResult, text: str) -> bool:
-    if intent.label in _NEVER_START:
-        return False
-
-    if intent.label == IntentLabel.READY_TO_BUY and intent.confidence >= START_CONFIDENCE:
-        return True
-
-    return bool(_BUY_PHRASES.search(text or ""))
-
-
-
-
-
+_CONFIRM_WORDS = {
+    "yes", "y", "yeah", "yep", "ok", "okay", "sure", "confirm", "confirmed", "confirm order", "go ahead", "done",
+    "تمام", "اكد", "أكد", "اكيد", "أكيد", "موافق", "ايوه", "أيوه", "اه", "نعم", "تم", "ماشي", "اوكي",
+    "tamam", "akid", "aywa", "mashy",
+}
 
 
 @dataclass
 class OrderTurn:
-    event: str            # unavailable | cancelled | collecting_items | collecting_details | awaiting_confirmation
+    event: str            # unavailable | cancelled | collecting_items | collecting_details | awaiting_confirmation | order_created
     state_text: str
     draft: OrderDraft | None = None
+    order: dict | None = None
 
 
 # ---------------------------------------------------------------- public
+
+def wants_to_start(intent: IntentResult, text: str) -> bool:
+    if intent.label in _NEVER_START:
+        return False
+    if intent.label == IntentLabel.READY_TO_BUY and intent.confidence >= START_CONFIDENCE:
+        return True
+    return bool(_BUY_PHRASES.search(text or ""))
+
 
 def process_order_turn(
     *,
@@ -107,6 +111,10 @@ def process_order_turn(
     shipping = get_shipping(store_id)
     country = settings.country or "EG"
     currency = settings.currency or "EGP"
+
+    if state.draft and state.draft.step == "awaiting_confirmation" and _is_confirmation(extraction, text):
+        return _confirm(store_id, conversation_id, state, channel=channel,
+                        customer_external_id=customer_external_id, shipping=shipping, currency=currency)
 
     notes: list[str] = []
     for attempt in range(_SAVE_ATTEMPTS):
@@ -242,4 +250,95 @@ def _state_text(draft: OrderDraft, summary: dict | None, notes: list[str], curre
     if notes:
         lines.append("Notes for this reply:")
         lines += [f"- {n}" for n in notes]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- confirmation -> order
+
+def _is_confirmation(ex: OrderExtraction, text: str) -> bool:
+    """A pure 'yes'. Any new item or detail in the same message is a change, not a confirmation."""
+    if ex.items or ex.customer or ex.cancel:
+        return False
+    if ex.confirm:
+        return True
+    words = " ".join(re.sub(r"[^\w\s]", " ", (text or "").lower()).split())
+    return words in _CONFIRM_WORDS
+
+
+def _revalidate(store_id: str, draft: OrderDraft, currency: str) -> list[str]:
+    """Current DB prices + live stock at the moment of confirmation."""
+    notes: list[str] = []
+    products = {p.product_id: p for p in fetch_products(store_id, list({i.product_id for i in draft.items}))}
+    checks = check_stock(store_id, [(i.product_id, i.variant_sku) for i in draft.items])
+    kept: list[OrderItem] = []
+    for item, check in zip(draft.items, checks):
+        product = products.get(item.product_id)
+        variant = (next((v for v in product.variants if v.sku == item.variant_sku), None)
+                   if product and item.variant_sku else None)
+        if product is None or (item.variant_sku and variant is None):
+            notes.append(f"{item.name} is no longer sold by the store — it was removed.")
+            continue
+        if check.level == "out_of_stock":
+            notes.append(f"{item.name} just went out of stock — it was removed.")
+            continue
+        price = variant.price if variant else product.price
+        if round(price, 2) != round(item.unit_price, 2):
+            notes.append(f"The price of {item.name} changed to {_money(price, currency)}.")
+            item = item.model_copy(update={"unit_price": price})
+        kept.append(item)
+    draft.items = kept
+    return notes
+
+
+def _confirm(store_id, conversation_id, state, *, channel, customer_external_id, shipping, currency) -> OrderTurn | None:
+    draft = state.draft.model_copy(deep=True)
+    confirmed_hash = draft.confirmation_hash
+    notes = _revalidate(store_id, draft, currency)
+    summary = _finalize(draft, shipping, currency)
+
+    if summary is None or draft.confirmation_hash != confirmed_hash:
+        notes.insert(0, "Something changed since the summary (price or availability). Explain it, show the "
+                        "updated order, and ask the customer to confirm again. Nothing was ordered yet.")
+        if not workflow.save_draft(store_id, conversation_id, draft, expected_version=state.version):
+            return None
+        return OrderTurn(draft.step, _state_text(draft, summary, notes, currency), draft)
+
+    order = create_order(
+        store_id, channel=channel, customer_external_id=customer_external_id,
+        customer=to_customer_details(draft.customer), items=draft.items, currency=currency,
+        shipping_fee=summary["shipping_fee"], conversation_id=conversation_id,
+        idempotency_key=f"{conversation_id}:{confirmed_hash}",
+    )
+    workflow.clear_draft(store_id, conversation_id, expected_version=state.version)
+    _notify_merchant(store_id, conversation_id, order)
+    logger.info("Order created", extra={"inbox_conversation": conversation_id, "order_number": order["number"]})
+    return OrderTurn("order_created", _placed_text(order), draft, order=order)
+
+
+def _notify_merchant(store_id: str, conversation_id: str, order: dict) -> None:
+    total = (_money(order["total"], order["currency"]) if order["total"] is not None
+             else "shipping fee to be set by you")
+    try:
+        note = inbox_repo.add_message(store_id, conversation_id, "system",
+                                      f"New order {order['number']} ({total}) — awaiting your approval",
+                                      delivery_status="internal")
+        if note:
+            events.emit_message_created(store_id, note)
+    except LookupError:
+        pass
+    events.emit(store_id, "order.created", conversation_id, {"order": {
+        k: order.get(k) for k in ("id", "number", "status", "total", "currency", "shipping_status")}})
+
+
+def _placed_text(order: dict) -> str:
+    cur = order["currency"]
+    lines = [f"ORDER PLACED: order number {order['number']}. Status: awaiting the store's approval. "
+             "Payment: cash on delivery.", "Items:"]
+    lines += [_item_line(OrderItem(**i), cur) for i in order["items"]]
+    if order["total"] is not None:
+        lines.append(f"Total: {_money(order['total'], cur)} (including {_money(order['shipping_fee'], cur)} shipping)")
+    else:
+        lines.append(f"Subtotal: {_money(order['subtotal'], cur)}. The store will confirm the shipping fee and final total.")
+    lines.append("NEXT: thank the customer, give them the order number, and say the store will confirm the order. "
+                 "Do not promise a delivery date.")
     return "\n".join(lines)
