@@ -65,7 +65,8 @@ from app.memory.fact_extractor import extract_facts, merge_facts
 from app.commerce.stock import attach_stock
 from app.commerce.order_status import order_status_text, wants_status
 from app.settings.store_settings import get_settings
-
+from app.commerce.aftersales import process_aftersales
+from app.settings.store_settings import get_policies
 from app.schemas.models import (
     AgentReply,
     CustomerMessage,
@@ -272,9 +273,30 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
             ),
             None,
         )
+        
+        
+    aftersales = _time_step(
+        "aftersales",
+        lambda: process_aftersales(
+            store_id=message.store_id,
+            conversation_id=message.conversation_id,
+            channel=message.channel,
+            customer_external_id=message.customer_id,
+            text=message.text,
+            intent=intent,
+            policies=get_policies(message.store_id),
+            store_country=get_settings(message.store_id).country or "EG",
+        ),
+        None,
+    )
+    if aftersales:
+        status_text = None  # after-sales already includes the order facts
     order_blocks = "\n\n".join(
-        b for b in (order_turn.state_text if order_turn else None, status_text) if b
-    ) or None
+        b for b in (order_turn.state_text if order_turn else None, status_text,
+                    aftersales.state_text if aftersales else None) if b
+    ) or None    
+        
+        
     
     
 

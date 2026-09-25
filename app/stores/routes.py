@@ -12,6 +12,8 @@ from app.settings.store_settings import create_store, get_settings
 from app.commerce.shipping import ShippingSettings
 from app.settings.store_credentials import get_credentials
 from app.settings.store_settings import get_shipping, set_shipping
+from app.commerce.policies import StorePolicies
+from app.settings.store_settings import get_policies, set_policies
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/stores", tags=["stores"])
@@ -80,3 +82,14 @@ def put_shipping_endpoint(
     set_shipping(store_id, body)
 
     return {"configured": True, "settings": body.model_dump()}
+
+
+@router.get("/{store_id}/policies", response_model=StorePolicies)
+def get_policies_endpoint(store_id: str = Depends(require_store_member)) -> StorePolicies:
+    return get_policies(store_id)
+
+
+@router.put("/{store_id}/policies", response_model=StorePolicies)
+def put_policies_endpoint(body: StorePolicies, store_id: str = Depends(require_store_member)) -> StorePolicies:
+    set_policies(store_id, body)
+    return body

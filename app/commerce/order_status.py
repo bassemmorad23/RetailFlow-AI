@@ -176,29 +176,49 @@ def live_status(store_id: str, order: dict, client: httpx.Client | None = None) 
 
 # ---------------------------------------------------------------- public
 
-def order_status_text(*, store_id: str, conversation_id: str, channel: str, customer_external_id: str,
-                      text: str, store_country: str) -> str:
-    """Facts block for the AI. Always safe to show to the requester."""
+def identify_orders(*, store_id: str, conversation_id: str, channel: str, customer_external_id: str,
+                    text: str, store_country: str) -> tuple[list[dict], str]:
+    """
+    Orders this requester may see, and how they were identified:
+    own | verified (number + phone) | locked | none. Shared by order status and after-sales.
+    """
     if _failed_count(store_id, conversation_id) >= FAILED_LIMIT:
-        return LOCKED
+        return [], "locked"
 
     own = orders.list_customer_orders(store_id, channel, customer_external_id, limit=10)
     number = _order_number(text)
-
     if number:
         order = orders.get_order_by_number(store_id, number)
         if order and any(o["id"] == order["id"] for o in own):
-            return _describe([order], store_id)
+            return [order], "own"
         phone = _phone(_ORDER_NUMBER.sub(" ", text), store_country)
         if order and phone and phone == order["customer"]["phone"]:
-            return _describe([order], store_id)
+            return [order], "verified"
         if phone:  # a real attempt with number + phone that didn't match
             _record_failure(store_id, conversation_id)
-        return NEUTRAL
+        return [], "none"
+    return (own[:MAX_ORDERS_SHOWN], "own") if own else ([], "none")
 
-    if own:
-        return _describe(own[:MAX_ORDERS_SHOWN], store_id)
-    return NEUTRAL
+
+def order_status_text(*, store_id: str, conversation_id: str, channel: str, customer_external_id: str,
+                      text: str, store_country: str) -> str:
+    """Facts block for the AI. Always safe to show to the requester."""
+    found, how = identify_orders(store_id=store_id, conversation_id=conversation_id, channel=channel,
+                                 customer_external_id=customer_external_id, text=text, store_country=store_country)
+    if how == "locked":
+        return LOCKED
+    return _describe(found, store_id) if found else NEUTRAL
+
+
+def current_status(store_id: str, order: dict) -> tuple[str, list[str], bool]:
+    """(customer-facing status, tracking, shipped_or_later)."""
+    live = live_status(store_id, order)
+    if live:
+        status, tracking = live
+    else:
+        status, tracking = _STOREFLOW_STATUS.get(order["status"], order["status"]), []
+    shipped = any(w in status for w in ("shipped", "delivered", "completed")) or order["status"] in ("shipped", "delivered")
+    return status, tracking, shipped
 
 
 def _describe(found: list[dict], store_id: str) -> str:

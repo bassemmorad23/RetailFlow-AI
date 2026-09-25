@@ -6,9 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.auth.dependencies import get_current_user_id, require_store_member
 from app.commerce import order_actions as actions
 from app.commerce import repository as repo
-from app.commerce.models import Order, OrderStatus, RejectReason
+from app.commerce.models import CaseStatus, Order, OrderStatus, RejectReason, SupportCase
+from app.inbox import repository as inbox_repo
 
 router = APIRouter(prefix="/stores/{store_id}/orders", tags=["orders"])
+cases_router = APIRouter(prefix="/stores/{store_id}/cases", tags=["support cases"])
 
 
 class OrderList(BaseModel):
@@ -77,3 +79,38 @@ def ship(order_id: str, store_id: str = Depends(require_store_member),
 def deliver(order_id: str, store_id: str = Depends(require_store_member),
             user_id: str = Depends(get_current_user_id)) -> dict:
     return _run(actions.mark_delivered, store_id, order_id, user_id=user_id)
+
+
+# ---------------------------------------------------------------- support cases
+
+class CaseList(BaseModel):
+    cases: list[SupportCase]
+
+
+class CaseStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: CaseStatus
+
+
+@cases_router.get("", response_model=CaseList)
+def list_cases(store_id: str = Depends(require_store_member), status: CaseStatus | None = None) -> dict:
+    return {"cases": repo.list_cases(store_id, status=status)}
+
+
+@cases_router.get("/{case_id}", response_model=SupportCase)
+def get_case(case_id: str, store_id: str = Depends(require_store_member)) -> dict:
+    case = repo.get_case(store_id, case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return case
+
+
+@cases_router.post("/{case_id}/status", response_model=SupportCase)
+def set_case_status(case_id: str, body: CaseStatusRequest, store_id: str = Depends(require_store_member)) -> dict:
+    if not repo.set_case_status(store_id, case_id, body.status):
+        raise HTTPException(status_code=404, detail="Case not found")
+    case = repo.get_case(store_id, case_id)
+    cid = case.get("conversation_id")
+    if cid and body.status in ("resolved", "closed") and repo.find_open_case(store_id, cid) is None:
+        inbox_repo.set_needs_attention(store_id, cid, False)
+    return case

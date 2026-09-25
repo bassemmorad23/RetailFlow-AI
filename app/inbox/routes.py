@@ -64,6 +64,7 @@ def list_conversations(
     channel: Channel | None = None,
     ai_mode: AiMode | None = None,
     unread: bool = False,
+    needs_attention: bool = False,
     cursor: str | None = Query(default=None, max_length=300),
     limit: int = Query(default=30, ge=1, le=100),
 ) -> dict:
@@ -71,7 +72,7 @@ def list_conversations(
     try:
         docs, next_cursor = repo.list_conversations(
             store_id, channel=channel, ai_mode=ai_mode, unread_only=unread,
-            cursor=cursor, limit=limit,
+            needs_attention=needs_attention, cursor=cursor, limit=limit,
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid cursor")
@@ -161,3 +162,10 @@ def mark_read(conversation_id: str, store_id: str = Depends(require_store_member
         return with_reply_window(actions.mark_read(store_id, conversation_id))
     except actions.ConversationNotFound:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
+
+
+@router.post("/{conversation_id}/attention/clear", response_model=InboxConversation)
+def clear_attention(conversation_id: str, store_id: str = Depends(require_store_member)) -> dict:
+    _conversation_or_404(store_id, conversation_id)
+    repo.set_needs_attention(store_id, conversation_id, False)
+    return with_reply_window(_conversation_or_404(store_id, conversation_id))

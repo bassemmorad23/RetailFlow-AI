@@ -1021,6 +1021,7 @@ class StoreSettings(BaseModel):
     country: str | None = Field(default=None, description="ISO 3166-1 alpha-2, e.g. EG.")
     currency: str | None = Field(default=None, description="ISO 4217, e.g. EGP.")
     shipping: dict | None = Field(default=None, description="ShippingSettings chosen at setup; None = not configured.")
+    policies: dict | None = Field(default=None, description="StorePolicies text per topic.")
     
 
     plan: str = Field(

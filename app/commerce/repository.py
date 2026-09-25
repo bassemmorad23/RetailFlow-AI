@@ -244,6 +244,31 @@ def create_case(
     return doc
 
 
+def find_open_case(store_id: str, conversation_id: str) -> dict | None:
+    return _db()["support_cases"].find_one(
+        {"store_id": store_id, "conversation_id": conversation_id, "status": {"$in": ["open", "in_progress"]}}, _PROJ)
+
+
+def append_to_case(store_id: str, case_id: str, text: str, order_id: str | None = None) -> dict | None:
+    """Add the latest problem description to the open case (never a duplicate case)."""
+    case = get_case(store_id, case_id)
+    if case is None:
+        return None
+    description = (case["description"] + "\n---\n" + text.strip())[-2000:]
+    update = {"description": description, "updated_at": _now()}
+    if order_id and not case.get("order_id"):
+        update["order_id"] = order_id
+    return _db()["support_cases"].find_one_and_update(
+        {"store_id": store_id, "id": case_id}, {"$set": update}, projection=_PROJ, return_document=ReturnDocument.AFTER)
+
+
+def list_cases(store_id: str, *, status: str | None = None, limit: int = 50) -> list[dict]:
+    query: dict = {"store_id": store_id}
+    if status:
+        query["status"] = status
+    return list(_db()["support_cases"].find(query, _PROJ).sort("created_at", DESCENDING).limit(max(1, min(limit, 100))))
+
+
 def get_case(store_id: str, case_id: str) -> dict | None:
     return _db()["support_cases"].find_one({"store_id": store_id, "id": case_id}, _PROJ)
 

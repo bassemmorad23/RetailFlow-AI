@@ -60,6 +60,7 @@ def _db() -> Database:
                       partialFilterExpression={"external_message_id": {"$type": "string"}})
     msgs.create_index([("store_id", ASCENDING), ("client_message_id", ASCENDING)], unique=True,
                       partialFilterExpression={"client_message_id": {"$type": "string"}})
+    msgs.create_index([("store_id", ASCENDING), ("external_message_ids", ASCENDING)])
 
     events = db["inbox_events"]
     events.create_index([("store_id", ASCENDING), ("seq", ASCENDING)], unique=True)
@@ -114,6 +115,7 @@ def get_conversation(store_id: str, conversation_id: str) -> dict | None:
         {"store_id": store_id, "id": conversation_id}, _CONV_PROJECTION
     )
 
+
 def find_conversation_by_customer(store_id: str, channel: str, customer_external_id: str) -> dict | None:
     """Look up without creating (used by widget polling)."""
     return _db()["inbox_conversations"].find_one(
@@ -142,6 +144,7 @@ def list_conversations(
     channel: str | None = None,
     ai_mode: str | None = None,
     unread_only: bool = False,
+    needs_attention: bool = False,
     cursor: str | None = None,
     limit: int = 30,
 ) -> tuple[list[dict], str | None]:
@@ -153,6 +156,8 @@ def list_conversations(
         query["ai_mode"] = ai_mode
     if unread_only:
         query["unread_count"] = {"$gt": 0}
+    if needs_attention:
+        query["needs_attention"] = True
     if cursor:
         ts, cid = _decode_cursor(cursor)
         query["$or"] = [{"updated_at": {"$lt": ts}}, {"updated_at": ts, "id": {"$lt": cid}}]
@@ -189,6 +194,23 @@ def change_ai_mode(
     return result.modified_count == 1
 
 
+def set_needs_attention(store_id: str, conversation_id: str, value: bool) -> bool:
+    result = _db()["inbox_conversations"].update_one(
+        {"store_id": store_id, "id": conversation_id}, {"$set": {"needs_attention": value}})
+    return result.matched_count == 1
+
+
+def get_aftersales_state(store_id: str, conversation_id: str) -> dict | None:
+    doc = _db()["inbox_conversations"].find_one({"store_id": store_id, "id": conversation_id},
+                                                {"_id": 0, "aftersales": 1})
+    return (doc or {}).get("aftersales")
+
+
+def set_aftersales_state(store_id: str, conversation_id: str, state: dict | None) -> None:
+    _db()["inbox_conversations"].update_one({"store_id": store_id, "id": conversation_id},
+                                            {"$set": {"aftersales": state}})
+
+
 def mark_read(store_id: str, conversation_id: str) -> bool:
     result = _db()["inbox_conversations"].update_one(
         {"store_id": store_id, "id": conversation_id},
@@ -218,7 +240,6 @@ def add_message(
     """
     db = _db()
     msgs = db["inbox_messages"]
-    msgs.create_index([("store_id", ASCENDING), ("external_message_ids", ASCENDING)])
 
     if external_message_id and msgs.find_one(
         {"store_id": store_id, "external_message_id": external_message_id}, {"_id": 1}
@@ -285,6 +306,7 @@ def get_message_by_client_id(store_id: str, conversation_id: str, client_message
         {"store_id": store_id, "conversation_id": conversation_id, "client_message_id": client_message_id},
         _MSG_PROJECTION,
     )
+
 
 def find_message_by_external_id(store_id: str, external_id: str) -> dict | None:
     """Match a platform message id against single-part and multi-part sends."""
@@ -388,8 +410,8 @@ def events_after(store_id: str, after_seq: int, limit: int = 100) -> list[dict]:
             {"store_id": store_id, "seq": {"$gt": after_seq}}, {"_id": 0}
         ).sort("seq", ASCENDING).limit(limit)
     )
-    
-    
+
+
 def latest_event_seq(store_id: str) -> int:
     """Current last event seq for a store (0 if none yet)."""
     doc = _db()["inbox_event_counters"].find_one({"_id": store_id})

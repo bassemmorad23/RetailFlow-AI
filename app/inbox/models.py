@@ -53,6 +53,7 @@ class InboxConversation(_Base):
     last_message: LastMessage | None = None
     message_seq: int = 0
     unread_count: int = 0
+    needs_attention: bool = False
     last_read_at: datetime | None = None
     last_customer_message_at: datetime | None = None
     reply_window_open: bool = True
