@@ -63,6 +63,8 @@ from app.response.response_generator import FALLBACK_REPLY
 from app.inbox.summary import ConversationContext
 from app.memory.fact_extractor import extract_facts, merge_facts
 from app.commerce.stock import attach_stock
+from app.commerce.order_status import order_status_text, wants_status
+from app.settings.store_settings import get_settings
 
 from app.schemas.models import (
     AgentReply,
@@ -255,6 +257,26 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
         ),
         None,
     )
+    
+    status_text = None
+    if wants_status(intent, message.text):
+        status_text = _time_step(
+            "order_status",
+            lambda: order_status_text(
+                store_id=message.store_id,
+                conversation_id=message.conversation_id,
+                channel=message.channel,
+                customer_external_id=message.customer_id,
+                text=message.text,
+                store_country=get_settings(message.store_id).country or "EG",
+            ),
+            None,
+        )
+    order_blocks = "\n\n".join(
+        b for b in (order_turn.state_text if order_turn else None, status_text) if b
+    ) or None
+    
+    
 
     # Comparison flow: intercept COMPARE_PRODUCTS intent (confidence-gated)
     # to prevent BART false positives from hijacking the response.
@@ -286,7 +308,7 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
             industry_id=industry_id,
             comparison=comparison,
             summary=context.summary if context else None,
-            order_state=order_turn.state_text if order_turn else None,
+            order_state=order_blocks,
         ),
         PIPELINE_ERROR_REPLY,
     )
