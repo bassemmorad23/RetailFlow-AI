@@ -163,6 +163,47 @@ def change_order_status(store_id: str, order_id: str, *, new_status: str, by: st
     return updated
 
 
+def list_orders(store_id: str, *, status: str | None = None, limit: int = 50) -> list[dict]:
+    query: dict = {"store_id": store_id}
+    if status:
+        query["status"] = status
+    return list(_db()["orders"].find(query, _PROJ).sort("created_at", DESCENDING).limit(max(1, min(limit, 100))))
+
+
+def set_shipping_fee(store_id: str, order_id: str, fee: float) -> dict | None:
+    """Only while pending approval. Recomputes total."""
+    order = get_order(store_id, order_id)
+    if order is None or order["status"] != "pending_approval":
+        return None
+    fee = _money(fee)
+    return _db()["orders"].find_one_and_update(
+        {"store_id": store_id, "id": order_id, "status": "pending_approval"},
+        {"$set": {"shipping_fee": fee, "shipping_status": "quoted",
+                  "total": _money(order["subtotal"] + fee), "updated_at": _now()}},
+        projection=_PROJ, return_document=ReturnDocument.AFTER,
+    )
+
+
+def set_push_state(store_id: str, order_id: str, status: str, *, error: str | None = None,
+                   count_attempt: bool = False) -> None:
+    # Pipeline update: works whether `push` is still null or already an object.
+    now = _now()
+    _db()["orders"].update_one({"store_id": store_id, "id": order_id}, [{"$set": {
+        "push": {
+            "status": status,
+            "error": error,
+            "updated_at": now,
+            "attempts": {"$add": [{"$ifNull": ["$push.attempts", 0]}, 1 if count_attempt else 0]},
+        },
+        "updated_at": now,
+    }}])
+
+
+def set_rejection(store_id: str, order_id: str, reason: str, message: str) -> None:
+    _db()["orders"].update_one({"store_id": store_id, "id": order_id},
+                               {"$set": {"rejection": {"reason": reason, "message": message[:500]}}})
+
+
 def set_platform_ref(store_id: str, order_id: str, *, platform: str, platform_order_id: str,
                      platform_order_number: str | None = None) -> None:
     _db()["orders"].update_one(

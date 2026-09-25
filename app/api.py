@@ -77,7 +77,7 @@ from app.widget.routes import router as widget_router
 from app.channels.signatures import verify_meta_signature, webhook_secrets
 import json
 from app.security.production import docs_kwargs, is_production, require_metrics_access
-
+from app.commerce.routes import router as orders_router
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -106,6 +106,7 @@ app.include_router(stores_router)
 app.include_router(inbox_router)
 app.include_router(inbox_stream_router)
 app.include_router(widget_router)
+app.include_router(orders_router)
 
 app.add_middleware(CorsCsrfMiddleware)
 

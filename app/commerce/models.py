@@ -21,6 +21,8 @@ PaymentMethod = Literal["cod"]
 CaseType = Literal["return", "exchange", "refund", "complaint", "delivery_issue", "other"]
 CaseStatus = Literal["open", "in_progress", "resolved", "closed"]
 DraftStep = Literal["collecting_items", "collecting_details", "awaiting_confirmation"]
+RejectReason = Literal["out_of_stock", "cannot_deliver", "suspected_fake", "other"]
+PushStatus = Literal["not_needed", "pending", "succeeded", "failed"]
 
 MAX_ORDER_LINES = 10
 MAX_QUANTITY_PER_LINE = 20
@@ -91,6 +93,18 @@ class PlatformRef(_Loose):
     order_number: str | None = None
 
 
+class PushState(_Loose):
+    status: PushStatus
+    error: str | None = None
+    attempts: int = 0
+    updated_at: datetime | None = None
+
+
+class Rejection(_Loose):
+    reason: RejectReason
+    message: str = ""
+
+
 class StatusChange(_Loose):
     status: OrderStatus
     at: datetime
@@ -115,6 +129,8 @@ class Order(_Loose):
     status: OrderStatus
     status_history: list[StatusChange]
     platform: PlatformRef | None = None
+    push: PushState | None = None
+    rejection: Rejection | None = None
     created_at: datetime
     updated_at: datetime
 
