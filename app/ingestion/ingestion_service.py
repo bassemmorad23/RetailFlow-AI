@@ -18,6 +18,7 @@ from app.rag.indexer import sync_products_to_qdrant
 from app.ingestion.ai_column_mapper import ai_map_columns
 from datetime import datetime, timezone
 from app.ingestion.history import record_run
+from app.ingestion.platform_updates import all_store_products, remove_missing_platform_products, save_products
 
 
 
@@ -99,34 +100,21 @@ def _ingest_products_impl(
     # Failed = rows that didn't produce any Product
     # (e.g. missing product_id/name/price). Rough estimate.
     result.failed = max(0, len(rows) - sum(max(len(p.variants), 1) for p in products))
+    
+    result.created, result.updated = save_products(store_id, products)
 
-    col = _get_collection()
-    for product in products:
-        doc = product.model_dump()
-        write = col.update_one(
-             {"store_id": store_id, "product_id": product.product_id},
-             {"$set": doc},
-            upsert=True,
-        )
-        
-        if write.upserted_id is not None:
-            result.created += 1
-        elif write.matched_count > 0:
-            result.updated += 1
-    
-    
-    # Sync to Qdrant — RAG must reflect the catalog
-    qdrant_result = sync_products_to_qdrant(store_id, products)
+    # Full platform syncs also remove products deleted on the platform (with safety guards).
+    if adapter.get_source_name() in ("shopify", "woocommerce"):
+        remove_missing_platform_products(store_id, {p.product_id for p in products})
+
+    # AI search follows MongoDB: snapshot of the COMPLETE catalog (incl. CSV products).
+    qdrant_result = sync_products_to_qdrant(store_id, all_store_products(store_id))
     logger.info(
         "Qdrant sync during ingestion",
-        extra={
-            "qdrant_upserted": qdrant_result["upserted"],
-            "qdrant_deleted": qdrant_result["deleted"],
-        },
+        extra={"qdrant_upserted": qdrant_result["upserted"], "qdrant_deleted": qdrant_result["deleted"]},
     )
     
     
-      
     logger.info(
     "Ingestion complete",
     extra={

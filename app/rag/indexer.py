@@ -78,74 +78,70 @@ def _ensure_collection(store_id: str) -> None:
     logger.info("Created Qdrant collection: %s", store_id)
 
 
-def sync_products_to_qdrant(store_id: str, products: list[Product]) -> dict:
-    """
-    Upsert all products to Qdrant + delete orphans (products in Qdrant
-    that are no longer in the given list).
+# Replace everything from `def sync_products_to_qdrant(` to the end of app/rag/indexer.py with this.
 
-    Returns {'upserted': N, 'deleted': N} for logging.
-    Never raises — errors logged, ingestion continues.
-    """
-    result = {"upserted": 0, "deleted": 0}
-
+def upsert_products_to_qdrant(store_id: str, products: list[Product]) -> int:
+    """Upsert vectors for these products only (deterministic ids -> idempotent). Never raises."""
+    if not products:
+        return 0
     try:
         _ensure_collection(store_id)
+        texts = [_build_text(p) for p in products]
+        vectors = _load_model().encode(texts, normalize_embeddings=True).tolist()
+        points = [
+            qmodels.PointStruct(
+                id=_point_id(store_id, p.product_id),
+                vector=vec,
+                payload={"source": p.product_id, "content": text, "name": p.name, "price": p.price},
+            )
+            for p, text, vec in zip(products, texts, vectors)
+        ]
+        _client().upsert(collection_name=store_id, points=points)
+        return len(points)
+    except Exception:
+        logger.exception("Qdrant upsert failed for store %s", store_id)
+        return 0
+
+
+def delete_products_from_qdrant(store_id: str, product_ids: list[str]) -> int:
+    """Delete vectors for these products only. Never raises."""
+    if not product_ids:
+        return 0
+    try:
+        _ensure_collection(store_id)
+        _client().delete(
+            collection_name=store_id,
+            points_selector=qmodels.PointIdsList(points=[_point_id(store_id, pid) for pid in product_ids]),
+        )
+        return len(product_ids)
+    except Exception:
+        logger.exception("Qdrant delete failed for store %s", store_id)
+        return 0
+
+
+def sync_products_to_qdrant(store_id: str, products: list[Product]) -> dict:
+    """
+    Snapshot sync: `products` must be the store's COMPLETE catalog (all of MongoDB).
+    Upserts them and deletes vectors of anything else. Never raises.
+    """
+    result = {"upserted": upsert_products_to_qdrant(store_id, products), "deleted": 0}
+    try:
         c = _client()
-        model = _load_model()
-
-        # 1. Upsert current products
-        if products:
-            texts = [_build_text(p) for p in products]
-            vectors = model.encode(texts, normalize_embeddings=True).tolist()
-
-            points = [
-                qmodels.PointStruct(
-                    id=_point_id(store_id, p.product_id),
-                    vector=vec,
-                    payload={
-                        "source": p.product_id,
-                        "content": text,
-                        "name": p.name,
-                        "price": p.price,
-                    },
-                )
-                for p, text, vec in zip(products, texts, vectors)
-            ]
-            c.upsert(collection_name=store_id, points=points)
-            result["upserted"] = len(points)
-
-        # 2. Delete orphans (in Qdrant but not in current products)
         current_ids = {_point_id(store_id, p.product_id) for p in products}
-        # Scroll all existing point IDs in the collection
         all_qdrant_ids: set[str] = set()
         offset = None
         while True:
-            batch, offset = c.scroll(
-                collection_name=store_id,
-                limit=1000,
-                offset=offset,
-                with_payload=False,
-                with_vectors=False,
-            )
+            batch, offset = c.scroll(collection_name=store_id, limit=1000, offset=offset,
+                                     with_payload=False, with_vectors=False)
             all_qdrant_ids.update(str(pt.id) for pt in batch)
             if offset is None:
                 break
-
         orphans = all_qdrant_ids - current_ids
         if orphans:
-            c.delete(
-                collection_name=store_id,
-                points_selector=qmodels.PointIdsList(points=list(orphans)),
-            )
+            c.delete(collection_name=store_id, points_selector=qmodels.PointIdsList(points=list(orphans)))
             result["deleted"] = len(orphans)
-
-        logger.info(
-            "Qdrant sync complete for %s: %d upserted, %d deleted",
-            store_id, result["upserted"], result["deleted"],
-        )
-
+        logger.info("Qdrant sync complete for %s: %d upserted, %d deleted",
+                    store_id, result["upserted"], result["deleted"])
     except Exception:
         logger.exception("Qdrant sync failed for store %s", store_id)
-        # Best-effort — don't raise
-
     return result
