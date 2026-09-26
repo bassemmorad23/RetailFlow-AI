@@ -30,6 +30,7 @@ from app.inbox.events import (
     emit_conversation_updated as _emit_conversation_updated,
     emit_message_created as _emit_message_created,
 )
+from app.settings.store_settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,8 @@ def _after(store_id: str, conversation_id: str, refresh_summary: bool) -> None:
 
 
 def _ai_enabled(store_id: str, conversation_id: str) -> bool:
+    if not get_settings(store_id).ai_enabled:
+        return False
     conv = repo.get_conversation(store_id, conversation_id)
     return conv is not None and conv.get("ai_mode") == "auto"
 

@@ -1024,6 +1024,11 @@ class StoreSettings(BaseModel):
     currency: str | None = Field(default=None, description="ISO 4217, e.g. EGP.")
     shipping: dict | None = Field(default=None, description="ShippingSettings chosen at setup; None = not configured.")
     policies: dict | None = Field(default=None, description="StorePolicies text per topic.")
+    ai_enabled: bool = True
+    reply_language: Literal["auto", "en", "ar"] = "auto"
+    brand_tone: Literal["friendly", "professional", "playful"] | None = None
+    brand_instructions: str = Field(default="", max_length=500)
+    business_hours: dict | None = None
     
 
     plan: str = Field(

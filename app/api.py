@@ -83,6 +83,7 @@ from app.products.routes import router as products_router
 from app.channels.routes import router as channels_router
 from app.ingestion.history import router as syncs_router
 from app.analytics.routes import router as analytics_router
+from app.stores.settings_api import router as store_settings_router
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -117,6 +118,7 @@ app.include_router(products_router)
 app.include_router(channels_router)
 app.include_router(syncs_router)
 app.include_router(analytics_router)
+app.include_router(store_settings_router)
 
 app.add_middleware(CorsCsrfMiddleware)
 

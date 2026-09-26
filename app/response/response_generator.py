@@ -173,7 +173,8 @@ def _call_single_model(model: str, prompt: str, system_prompt: str) -> tuple[str
     response = _client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content":  system_prompt + ("\n\n" + store_style if store_style else "")},
+            
             {"role": "user", "content": prompt},
         ],
     )
@@ -211,6 +212,7 @@ def generate_response(
     comparison: "ComparisonResult | None" = None,
     summary: str | None = None,
     order_state: str | None = None,
+    store_style: str | None = None
 ) -> str:
     """
     Build the prompt and call the model chain in order. The first model

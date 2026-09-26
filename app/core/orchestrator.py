@@ -78,6 +78,7 @@ from app.schemas.models import (
     MemoryState,
 )
 from app.commerce.order_flow import process_order_turn
+from app.stores.settings_api import hours_note, style_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -289,12 +290,22 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
         ),
         None,
     )
+    
+    
     if aftersales:
         status_text = None  # after-sales already includes the order facts
+    
+    store = get_settings(message.store_id)
+    needs_store = (order_turn and order_turn.event == "order_created") or \
+                  (aftersales and aftersales.outcome == "escalated")
+    team_note = hours_note(store) if needs_store else None
+    
+
     order_blocks = "\n\n".join(
         b for b in (order_turn.state_text if order_turn else None, status_text,
-                    aftersales.state_text if aftersales else None) if b
-    ) or None    
+                    aftersales.state_text if aftersales else None,
+                    f"Store team availability: {team_note}" if team_note else None) if b
+    ) or None
         
         
     
@@ -331,6 +342,7 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
             comparison=comparison,
             summary=context.summary if context else None,
             order_state=order_blocks,
+            store_style=style_prompt(store),
         ),
         PIPELINE_ERROR_REPLY,
     )
