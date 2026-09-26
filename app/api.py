@@ -84,8 +84,7 @@ from app.channels.routes import router as channels_router
 from app.ingestion.history import router as syncs_router
 from app.analytics.routes import router as analytics_router
 from app.stores.settings_api import router as store_settings_router
-from app.ingestion.webhooks import ensure_woocommerce_webhooks, router as product_webhooks_router
-
+from app.ingestion.webhooks import ensure_shopify_webhooks, ensure_woocommerce_webhooks, router as product_webhooks_router
 if settings.SENTRY_DSN:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
@@ -337,7 +336,11 @@ def shopify_callback(request: Request) -> dict:
 
     set_credentials(store_id, "shopify", {"shop": shop, "access_token": access_token})
     logger.info("Shopify OAuth completed", extra={"oauth_shop": shop})
-    return {"status": "installed", "shop": shop, "store_id": store_id}
+    
+    webhooks = ensure_shopify_webhooks(store_id)   # real-time product updates; best-effort
+    if not webhooks["ok"]:
+        logger.warning("Shopify webhook registration failed", extra={"shopify_webhook_error": webhooks})
+    return {"status": "installed", "shop": shop, "store_id": store_id, "webhooks": webhooks}
 
 
 @app.post(

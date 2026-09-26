@@ -151,3 +151,43 @@ def test_ensure_woocommerce_webhooks_is_idempotent(monkeypatch):
     assert secret and all(b["secret"] == secret for b in created_bodies)
     assert wh.ensure_woocommerce_webhooks(sid, client) == {"ok": True, "created": []}   # nothing duplicated
     assert wh.ensure_woocommerce_webhooks("store_none") == {"ok": False, "error": "not_connected"}
+
+
+def test_ensure_shopify_webhooks_is_idempotent(monkeypatch):
+    from app.ingestion import shopify_adapter as sa
+    monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "https://api.example")
+    monkeypatch.setattr(sa, "get_credentials", lambda s, src: {"shop": "t.myshopify.com", "access_token": "x"})
+    monkeypatch.setattr(wh, "get_credentials", lambda s, src: {"shop": "t.myshopify.com", "access_token": "x"})
+    subs, created = [], []
+
+    def handler(request):
+        body = json.loads(request.content)
+        if "webhookSubscriptions" in body["query"]:
+            return httpx.Response(200, json={"data": {"webhookSubscriptions": {"edges": [{"node": n} for n in subs]}}})
+        created.append(body["variables"])
+        subs.append({"id": str(len(subs)), "topic": body["variables"]["topic"], "uri": body["variables"]["uri"]})
+        return httpx.Response(200, json={"data": {"webhookSubscriptionCreate": {"webhookSubscription": {"id": "1"},
+                                                                                  "userErrors": []}}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    first = wh.ensure_shopify_webhooks("s", client)
+    assert first["ok"] and sorted(first["created"]) == sorted(wh._SHOPIFY_TOPIC_ENUMS.values())
+    assert {c["uri"] for c in created} == {"https://api.example/webhooks/shopify"}
+    assert wh.ensure_shopify_webhooks("s", client) == {"ok": True, "created": []}
+
+
+def test_ensure_shopify_webhooks_reports_errors(monkeypatch):
+    from app.ingestion import shopify_adapter as sa
+    monkeypatch.setattr(sa, "get_credentials", lambda s, src: {"shop": "t.myshopify.com", "access_token": "x"})
+    monkeypatch.setattr(wh, "get_credentials", lambda s, src: {"shop": "t.myshopify.com", "access_token": "x"})
+
+    def handler(request):
+        if "webhookSubscriptions" in json.loads(request.content)["query"]:
+            return httpx.Response(200, json={"data": {"webhookSubscriptions": {"edges": []}}})
+        return httpx.Response(200, json={"data": {"webhookSubscriptionCreate": {
+            "webhookSubscription": None, "userErrors": [{"field": ["uri"], "message": "Address is invalid"}]}}})
+
+    result = wh.ensure_shopify_webhooks("s", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert result["ok"] is False and "Address is invalid" in result["errors"][0]
+    monkeypatch.setattr(wh, "get_credentials", lambda s, src: None)
+    assert wh.ensure_shopify_webhooks("s") == {"ok": False, "error": "not_connected"}

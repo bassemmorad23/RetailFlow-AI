@@ -9,8 +9,8 @@ Flow for every delivery:
 Re-fetching makes out-of-order and duplicate deliveries harmless.
 
 Shopify: HMAC-SHA256 (base64) of the raw body with the app's client secret.
-         Topics products/create|update|delete, inventory_levels/update — declared
-         at app level in the Shopify Dev Dashboard (no per-store registration).
+         Topics products/create|update|delete, inventory_levels/update — registered
+         per store through the API by ensure_shopify_webhooks() (after OAuth).
 WooCommerce: HMAC-SHA256 (base64) with a per-store secret; webhooks registered
          per store by ensure_woocommerce_webhooks().
 """
@@ -31,7 +31,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.config import settings
 from app.ingestion.platform_updates import remove_platform_product, upsert_platform_products
-from app.ingestion.shopify_adapter import ShopifyAdapter
+from app.ingestion.shopify_adapter import ShopifyAdapter, _graphql
 from app.ingestion.woocommerce_adapter import WooCommerceAdapter
 from app.settings.store_credentials import _get_collection as creds_col
 from app.settings.store_credentials import get_credentials
@@ -257,3 +257,49 @@ def ensure_woocommerce_webhooks(store_id: str, client: httpx.Client | None = Non
             http.close()
 
     return {"ok": True, "created": created}
+
+
+# ---------------------------------------------------------------- Shopify registration
+
+_SHOPIFY_TOPIC_ENUMS = {"products/create": "PRODUCTS_CREATE", "products/update": "PRODUCTS_UPDATE",
+                        "products/delete": "PRODUCTS_DELETE", "inventory_levels/update": "INVENTORY_LEVELS_UPDATE"}
+_LIST_SUBSCRIPTIONS = "query { webhookSubscriptions(first: 100) { edges { node { id topic uri } } } }"
+_CREATE_SUBSCRIPTION = """
+mutation create($topic: WebhookSubscriptionTopic!, $uri: String!) {
+  webhookSubscriptionCreate(topic: $topic, webhookSubscription: {uri: $uri, format: JSON}) {
+    webhookSubscription { id }
+    userErrors { field message }
+  }
+}
+"""
+
+
+def shopify_delivery_url() -> str:
+    return f"{settings.PUBLIC_BASE_URL.rstrip('/')}/webhooks/shopify"
+
+
+def ensure_shopify_webhooks(store_id: str, client: httpx.Client | None = None) -> dict:
+    """Make sure this shop sends us every product topic. Idempotent: creates only what's missing."""
+    if get_credentials(store_id, "shopify") is None:
+        return {"ok": False, "error": "not_connected"}
+    url = shopify_delivery_url()
+    http = client or httpx.Client(timeout=30.0)
+    created, errors = [], []
+    try:
+        edges = (_graphql(store_id, http, _LIST_SUBSCRIPTIONS, {}).get("webhookSubscriptions") or {}).get("edges", [])
+        have = {e["node"]["topic"] for e in edges if e["node"].get("uri") == url}
+        for enum in _SHOPIFY_TOPIC_ENUMS.values():
+            if enum in have:
+                continue
+            result = _graphql(store_id, http, _CREATE_SUBSCRIPTION, {"topic": enum, "uri": url}) \
+                .get("webhookSubscriptionCreate") or {}
+            if result.get("userErrors"):
+                errors.append(f"{enum}: {result['userErrors'][0].get('message')}")
+            else:
+                created.append(enum)
+    except (httpx.HTTPError, RuntimeError) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "created": created}
+    finally:
+        if client is None:
+            http.close()
+    return {"ok": not errors, "created": created, **({"errors": errors} if errors else {})}
