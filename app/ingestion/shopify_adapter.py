@@ -21,7 +21,7 @@ from app.ingestion.source_adapter import SourceAdapter
 from app.settings.store_credentials import get_credentials
 
 
-_SHOPIFY_API_VERSION = "2025-01"
+_SHOPIFY_API_VERSION = "2026-07"
 
 _PRODUCTS_QUERY = """
 query getProducts($first: Int!, $cursor: String) {
