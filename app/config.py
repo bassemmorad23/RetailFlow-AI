@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     DASHBOARD_ORIGINS: str = "http://localhost:3000"  # comma-separated; add the real domain in production
     METRICS_TOKEN: str = ""  # required in production to read /metrics
     SESSION_COOKIE_SECURE: bool = False  # MUST be True in production (HTTPS)
+    PUBLIC_BASE_URL: str = "https://console-audacity-snort.ngrok-free.dev"  # your AWS domain in production
     response_model_chain: list[str] = [
     "openrouter/free"
 ]

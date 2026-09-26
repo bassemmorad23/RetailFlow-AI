@@ -84,6 +84,7 @@ from app.channels.routes import router as channels_router
 from app.ingestion.history import router as syncs_router
 from app.analytics.routes import router as analytics_router
 from app.stores.settings_api import router as store_settings_router
+from app.ingestion.webhooks import ensure_woocommerce_webhooks, router as product_webhooks_router
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -119,6 +120,7 @@ app.include_router(channels_router)
 app.include_router(syncs_router)
 app.include_router(analytics_router)
 app.include_router(store_settings_router)
+app.include_router(product_webhooks_router)
 
 app.add_middleware(CorsCsrfMiddleware)
 
@@ -252,7 +254,11 @@ def save_woocommerce_credentials(store_id: str, creds: WooCommerceCredentialsReq
         raise HTTPException(status_code=500, detail="Failed to save credentials")
 
     logger.info("WC credentials saved successfully")
-    return {"status": "saved", "store_id": store_id, "source": "woocommerce"}
+    
+    webhooks = ensure_woocommerce_webhooks(store_id)   # real-time product updates; best-effort
+    if not webhooks["ok"]:
+        logger.warning("WooCommerce webhook registration failed", extra={"wc_webhook_error": webhooks.get("error")})
+    return {"status": "saved", "store_id": store_id, "source": "woocommerce", "webhooks": webhooks}
 
 
 @app.post(
