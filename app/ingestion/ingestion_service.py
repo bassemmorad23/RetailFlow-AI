@@ -16,6 +16,9 @@ from app.ingestion.source_adapter import SourceAdapter
 from app.products.product_store import _get_collection
 from app.rag.indexer import sync_products_to_qdrant
 from app.ingestion.ai_column_mapper import ai_map_columns
+from datetime import datetime, timezone
+from app.ingestion.history import record_run
+
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +36,7 @@ class IngestionResult(BaseModel):
     source: str = ""
 
 
-def ingest_products(
+def _ingest_products_impl(
     adapter: SourceAdapter,
     store_id: str,
     industry_id: str,
@@ -135,4 +138,18 @@ def ingest_products(
         "ingest_unmapped": len(result.unmapped_columns),
     },
 )
+    return result
+
+
+
+def ingest_products(adapter, store_id: str, *args, **kwargs):
+    """Every import is recorded in the sync history (success or failure)."""
+    started = datetime.now(timezone.utc)
+    source = adapter.get_source_name()
+    try:
+        result = _ingest_products_impl(adapter, store_id, *args, **kwargs)
+    except Exception as exc:
+        record_run(store_id, source, started, error=f"{type(exc).__name__}: {exc}")
+        raise
+    record_run(store_id, source, started, result=result)
     return result
