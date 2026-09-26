@@ -35,6 +35,7 @@ from app.ingestion.shopify_adapter import ShopifyAdapter, _graphql
 from app.ingestion.woocommerce_adapter import WooCommerceAdapter
 from app.settings.store_credentials import _get_collection as creds_col
 from app.settings.store_credentials import get_credentials
+from app.log_context import set_request_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["platform webhooks"])
@@ -99,6 +100,7 @@ def refresh_product(store_id: str, platform: str, platform_product_id: str) -> s
 
 
 def _run(platform: str, store_id: str, delivery_id: str, work) -> None:
+    set_request_context(store_id=store_id)
     try:
         outcome = work()
         _finish(platform, store_id, delivery_id, "processed")

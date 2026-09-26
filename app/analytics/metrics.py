@@ -26,6 +26,7 @@ from app.billing.usage import check_usage
 from app.config import settings
 from app.core.orchestrator import PIPELINE_ERROR_REPLY
 from app.response.response_generator import FALLBACK_REPLY
+from app.settings.store_credentials import _get_collection as creds_col
 from app.settings.store_settings import get_settings
 
 CONFIRMED = {"approved", "shipped", "delivered"}
@@ -202,6 +203,12 @@ def needs_attention(store_id: str) -> list[dict]:
     ]
     out = [{"type": t, "severity": sev, "count": n, "message": msg.format(n=n), "link": link}
            for t, sev, n, msg, link in items if n]
+
+    if db_reconnect := creds_col().count_documents(
+            {"store_id": store_id, "source": "instagram", "credentials.token_status": "needs_reconnect"}):
+        out.append({"type": "instagram_reconnect", "severity": "high", "count": db_reconnect,
+                    "message": "Instagram connection expired — reconnect Instagram so customers get replies",
+                    "link": "/channels"})
 
     failed = _latest_failed_syncs(store_id)
     if failed:
