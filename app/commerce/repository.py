@@ -206,6 +206,22 @@ def set_rejection(store_id: str, order_id: str, reason: str, message: str) -> No
                                {"$set": {"rejection": {"reason": reason, "message": message[:500]}}})
 
 
+TERMINAL_FULFILMENT = ("delivered", "completed", "cancelled", "refunded")
+
+
+def set_fulfilment(store_id: str, order_id: str, state: str, tracking: list[str]) -> None:
+    _db()["orders"].update_one({"store_id": store_id, "id": order_id}, {"$set": {
+        "fulfilment": {"state": state, "tracking": tracking[:5], "checked_at": _now()}}})
+
+
+def list_open_platform_orders(store_id: str, limit: int = 50) -> list[dict]:
+    """Approved, pushed orders whose fulfilment isn't final yet (oldest check first)."""
+    return list(_db()["orders"].find(
+        {"store_id": store_id, "status": "approved", "platform.order_id": {"$exists": True, "$ne": None},
+         "fulfilment.state": {"$nin": list(TERMINAL_FULFILMENT)}}, _PROJ,
+    ).sort("fulfilment.checked_at", ASCENDING).limit(limit))
+
+
 def set_platform_ref(store_id: str, order_id: str, *, platform: str, platform_order_id: str,
                      platform_order_number: str | None = None) -> None:
     _db()["orders"].update_one(
@@ -276,8 +292,10 @@ def get_case(store_id: str, case_id: str) -> dict | None:
 def set_case_status(store_id: str, case_id: str, status: str) -> bool:
     if status not in ("open", "in_progress", "resolved", "closed"):
         raise ValueError(f"Invalid case status '{status}'")
+    now = _now()
+    resolved_at = now if status in ("resolved", "closed") else None
     result = _db()["support_cases"].update_one(
         {"store_id": store_id, "id": case_id},
-        {"$set": {"status": status, "updated_at": _now()}},
+        {"$set": {"status": status, "updated_at": now, "resolved_at": resolved_at}},
     )
     return result.matched_count == 1

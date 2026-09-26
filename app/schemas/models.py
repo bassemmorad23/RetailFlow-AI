@@ -511,6 +511,8 @@ class AgentReply(BaseModel):
     recommendations: list[ProductRecommendation] = Field(default_factory=list)
     retrieved_context: list[RetrievedChunk] = Field(default_factory=list)
     conversation_id: str
+    order_event: str | None = None          # order draft step / order_created / cancelled / unavailable
+    aftersales_outcome: str | None = None   # resolved / ask_order / escalated
 
     model_config = ConfigDict(extra="forbid")
 

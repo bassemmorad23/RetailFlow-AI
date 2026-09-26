@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.auth.dependencies import get_current_user_id, require_store_member
 from app.commerce import order_actions as actions
 from app.commerce import repository as repo
+from app.commerce.order_status import refresh_platform_orders
 from app.commerce.models import CaseStatus, Order, OrderStatus, RejectReason, SupportCase
 from app.inbox import repository as inbox_repo
 
@@ -42,6 +43,18 @@ def list_orders(store_id: str = Depends(require_store_member),
                 status: OrderStatus | None = None,
                 limit: int = Query(default=50, ge=1, le=100)) -> dict:
     return {"orders": repo.list_orders(store_id, status=status, limit=limit)}
+
+
+class RefreshResult(BaseModel):
+    checked: int
+    changed: int
+    failed: int
+
+
+@router.post("/refresh-platform", response_model=RefreshResult)
+def refresh_platform(store_id: str = Depends(require_store_member)) -> dict:
+    """Refresh fulfilment status from Shopify/WooCommerce for open orders (max 50 per call)."""
+    return refresh_platform_orders(store_id)
 
 
 @router.get("/{order_id}", response_model=Order)

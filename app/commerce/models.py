@@ -89,7 +89,7 @@ class ShippingOption(_Strict):
 class OrderDraft(_Strict):
     step: DraftStep = "collecting_items"
     shipping_options: list[ShippingOption] = Field(default_factory=list)
-    shipping_choice: str | None = None  # title of the chosen option (handles can change between calls)
+    shipping_choice: str | None = None  # handle of the chosen option
     items: list[OrderItem] = Field(default_factory=list, max_length=MAX_ORDER_LINES)
     customer: DraftCustomer = Field(default_factory=DraftCustomer)
     confirmation_hash: str | None = None  # hash of the exact summary the customer was shown
@@ -106,6 +106,17 @@ class PushState(_Loose):
     error: str | None = None
     attempts: int = 0
     updated_at: datetime | None = None
+
+
+FulfilmentState = Literal["pending", "preparing", "partially_shipped", "shipped", "delivered",
+                         "completed", "on_hold", "cancelled", "refunded", "failed"]
+
+
+class FulfilmentSnapshot(_Loose):
+    """Platform fulfilment status as of the last check (polling; webhooks later)."""
+    state: FulfilmentState
+    tracking: list[str] = Field(default_factory=list)
+    checked_at: datetime
 
 
 class Rejection(_Loose):
@@ -140,6 +151,7 @@ class Order(_Loose):
     platform: PlatformRef | None = None
     push: PushState | None = None
     rejection: Rejection | None = None
+    fulfilment: FulfilmentSnapshot | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -155,3 +167,4 @@ class SupportCase(_Loose):
     status: CaseStatus
     created_at: datetime
     updated_at: datetime
+    resolved_at: datetime | None = None

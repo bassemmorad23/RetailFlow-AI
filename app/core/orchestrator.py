@@ -388,6 +388,8 @@ def handle_message(message: CustomerMessage, context: ConversationContext | None
         intent=intent,
         recommendations=recommendations,
         retrieved_context=retrieved_context,
+        order_event=order_turn.event if order_turn else None,
+        aftersales_outcome=aftersales.outcome if aftersales else None,
     )
 
     _time_step(

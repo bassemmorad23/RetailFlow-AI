@@ -68,6 +68,9 @@ class AiMeta(_Base):
     intent: str | None = None
     intent_confidence: float | None = None
     product_ids: list[str] = Field(default_factory=list)
+    order_event: str | None = None
+    aftersales: str | None = None
+    
 
 
 class InboxMessage(_Base):

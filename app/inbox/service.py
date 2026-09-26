@@ -145,6 +145,8 @@ def _ai_meta(reply: AgentReply) -> dict:
         "intent": reply.intent.label.value,
         "intent_confidence": reply.intent.confidence,
         "product_ids": [r.product_id for r in reply.recommendations],
+        "order_event": reply.order_event,
+        "aftersales": reply.aftersales_outcome,
     }
 
 

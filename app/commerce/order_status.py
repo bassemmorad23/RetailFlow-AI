@@ -56,11 +56,6 @@ _STOREFLOW_STATUS = {
     "rejected": "not accepted — the store could not fulfil it",
     "cancelled": "cancelled",
 }
-_WC_STATUS = {
-    "pending": "received — waiting for the store", "processing": "confirmed — being prepared",
-    "on-hold": "on hold — the store will contact the customer", "completed": "completed (shipped/delivered)",
-    "cancelled": "cancelled", "refunded": "refunded", "failed": "failed — the store will contact the customer",
-}
 
 
 # ---------------------------------------------------------------- trigger + parsing
@@ -118,7 +113,17 @@ query status($id: ID!) {
 """
 
 
-def _shopify_status(store_id: str, platform_order_id: str, http: httpx.Client) -> tuple[str, list[str]] | None:
+_STATE_TEXT = {
+    "pending": "received — waiting for the store", "preparing": "confirmed — being prepared",
+    "partially_shipped": "partly shipped", "shipped": "shipped", "delivered": "delivered",
+    "completed": "completed (shipped/delivered)", "on_hold": "on hold — the store will contact the customer",
+    "cancelled": "cancelled", "refunded": "refunded", "failed": "failed — the store will contact the customer",
+}
+_WC_STATE = {"pending": "pending", "processing": "preparing", "on-hold": "on_hold", "completed": "completed",
+             "cancelled": "cancelled", "refunded": "refunded", "failed": "failed"}
+
+
+def _shopify_state(store_id: str, platform_order_id: str, http: httpx.Client) -> tuple[str, list[str]] | None:
     creds = get_credentials(store_id, "shopify")
     if creds is None:
         return None
@@ -140,11 +145,11 @@ def _shopify_status(store_id: str, platform_order_id: str, http: httpx.Client) -
     if fs == "FULFILLED":
         return "shipped", tracking
     if fs == "PARTIALLY_FULFILLED":
-        return "partly shipped", tracking
-    return "confirmed — being prepared", tracking
+        return "partially_shipped", tracking
+    return "preparing", tracking
 
 
-def _wc_status(store_id: str, platform_order_id: str, http: httpx.Client) -> tuple[str, list[str]] | None:
+def _wc_state(store_id: str, platform_order_id: str, http: httpx.Client) -> tuple[str, list[str]] | None:
     creds = get_credentials(store_id, "woocommerce")
     if creds is None:
         return None
@@ -152,26 +157,62 @@ def _wc_status(store_id: str, platform_order_id: str, http: httpx.Client) -> tup
                     auth=(creds["username"], creds["password"]))
     if resp.status_code >= 400:
         return None
-    status = resp.json().get("status")
-    return (_WC_STATUS.get(status, status), []) if status else None
+    state = _WC_STATE.get(resp.json().get("status"))
+    return (state, []) if state else None
 
 
-def live_status(store_id: str, order: dict, client: httpx.Client | None = None) -> tuple[str, list[str]] | None:
+def _shopify_status(store_id: str, platform_order_id: str, http: httpx.Client) -> tuple[str, list[str]] | None:
+    found = _shopify_state(store_id, platform_order_id, http)
+    return (_STATE_TEXT[found[0]], found[1]) if found else None
+
+
+def _wc_status(store_id: str, platform_order_id: str, http: httpx.Client) -> tuple[str, list[str]] | None:
+    found = _wc_state(store_id, platform_order_id, http)
+    return (_STATE_TEXT[found[0]], found[1]) if found else None
+
+
+def fetch_fulfilment(store_id: str, order: dict, client: httpx.Client | None = None) -> tuple[str, list[str]] | None:
+    """Live platform state + tracking, saved as the order's fulfilment snapshot. None if unavailable."""
     platform = order.get("platform") or {}
     if not platform.get("order_id"):
         return None
     http = client or httpx.Client(timeout=LIVE_TIMEOUT)
     try:
         if platform.get("type") == "shopify":
-            return _shopify_status(store_id, platform["order_id"], http)
-        if platform.get("type") == "woocommerce":
-            return _wc_status(store_id, platform["order_id"], http)
-        return None
+            found = _shopify_state(store_id, platform["order_id"], http)
+        elif platform.get("type") == "woocommerce":
+            found = _wc_state(store_id, platform["order_id"], http)
+        else:
+            found = None
     except (httpx.HTTPError, ValueError):
-        return None
+        found = None
     finally:
         if client is None:
             http.close()
+    if found:
+        orders.set_fulfilment(store_id, order["id"], found[0], found[1])
+    return found
+
+
+def live_status(store_id: str, order: dict, client: httpx.Client | None = None) -> tuple[str, list[str]] | None:
+    """Customer-facing text + tracking (also refreshes the stored snapshot)."""
+    found = fetch_fulfilment(store_id, order, client)
+    return (_STATE_TEXT[found[0]], found[1]) if found else None
+
+
+def refresh_platform_orders(store_id: str, limit: int = 50) -> dict:
+    """Refresh fulfilment snapshots for open pushed orders (merchant button / scheduler)."""
+    checked = updated = failed = 0
+    with httpx.Client(timeout=LIVE_TIMEOUT) as http:
+        for order in orders.list_open_platform_orders(store_id, limit=limit):
+            checked += 1
+            before = (order.get("fulfilment") or {}).get("state")
+            found = fetch_fulfilment(store_id, order, http)
+            if found is None:
+                failed += 1
+            elif found[0] != before:
+                updated += 1
+    return {"checked": checked, "changed": updated, "failed": failed}
 
 
 # ---------------------------------------------------------------- public
