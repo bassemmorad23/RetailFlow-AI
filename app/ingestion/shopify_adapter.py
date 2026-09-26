@@ -1,18 +1,13 @@
 """
-Shopify adapter.
+Shopify adapter (Admin GraphQL, per-store OAuth token).
 
-Fetches products via Shopify Admin GraphQL API using per-store OAuth token.
+- fetch_raw_products: full catalog (used by the full sync / reconciliation)
+- fetch_product_rows: ONE product, same fields + same flattening (used by webhooks)
+- product_id_for_inventory_item: stock-change webhooks carry an inventory item id
+Only ACTIVE products are imported; draft/archived products are treated as absent.
 
-WHY GraphQL:
-- REST deprecating variant endpoints Feb 2025
-- One query fetches products + variants + attributes → no N+1 like WooCommerce
-- Shopify's officially recommended API direction
-
-VARIANT HANDLING:
-Shopify products always have at least one variant (even simple products =
-one default variant). We flatten each variant to its own row sharing the
-parent product's `handle` as product_id. Downstream to_canonical_grouped
-handles the rest.
+Shopify products always have >=1 variant; each variant becomes a row sharing the
+product's handle as product_id, so to_canonical_grouped builds variants.
 """
 
 import httpx
@@ -20,15 +15,11 @@ import httpx
 from app.ingestion.source_adapter import SourceAdapter
 from app.settings.store_credentials import get_credentials
 
-
 _SHOPIFY_API_VERSION = "2026-07"
+_TIMEOUT = 30.0
 
-_PRODUCTS_QUERY = """
-query getProducts($first: Int!, $cursor: String) {
-  products(first: $first, after: $cursor) {
-    edges {
-      cursor
-      node {
+# Shared by the catalog query and the single-product query (never duplicated).
+_PRODUCT_FIELDS = """
         id
         handle
         title
@@ -45,128 +36,116 @@ query getProducts($first: Int!, $cursor: String) {
               compareAtPrice
               inventoryQuantity
               inventoryPolicy
-              inventoryItem {
-                tracked
-              }
-              selectedOptions {
-                name
-                value
-              }
-              image {
-                url
-              }
+              inventoryItem { tracked }
+              selectedOptions { name value }
+              image { url }
             }
           }
         }
-        images(first: 1) {
-          edges {
-            node {
-              url
-            }
-          }
-        }
-      }
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
+        images(first: 1) { edges { node { url } } }
+"""
+
+_PRODUCTS_QUERY = """
+query getProducts($first: Int!, $cursor: String) {
+  products(first: $first, after: $cursor) {
+    edges { cursor node { %s } }
+    pageInfo { hasNextPage endCursor }
   }
 }
-"""
+""" % _PRODUCT_FIELDS
+
+_PRODUCT_QUERY = "query getProduct($id: ID!) { product(id: $id) { %s } }" % _PRODUCT_FIELDS
+
+_INVENTORY_ITEM_QUERY = "query inv($id: ID!) { inventoryItem(id: $id) { variant { product { id } } } }"
 
 
 class ShopifyAdapter(SourceAdapter):
-    """
-    Shopify Admin GraphQL adapter.
-    Requires credentials in store_credentials with source='shopify':
-      { shop, access_token }
-    """
+    """Requires store_credentials source='shopify': {shop, access_token}."""
 
     def get_source_name(self) -> str:
         return "shopify"
 
     def get_source_columns(self, store_id: str) -> list[str]:
-        """
-        Shopify has a fixed schema per selectedOption. Actual attribute
-        names (Size, Color) vary per store but appear flattened as
-        top-level keys after fetch, so mapper builds from actual row keys.
-        """
-        return [
-            "product_id", "name", "description", "vendor", "product_type",
-            "price", "sku", "stock", "image_url",
-        ]
+        return ["product_id", "name", "description", "vendor", "product_type", "price", "sku", "stock", "image_url"]
 
     def fetch_raw_products(self, store_id: str) -> list[dict]:
-        """
-        Fetch all products via GraphQL, paginating with cursor.
-        Emits one row per variant, sharing parent's handle as product_id.
-        """
-        creds = get_credentials(store_id, "shopify")
-        if creds is None:
-            raise RuntimeError(
-                f"No Shopify credentials for store '{store_id}'. "
-                f"Run OAuth flow first."
-            )
-
-        shop = creds["shop"]
-        token = creds["access_token"]
-        url = f"https://{shop}/admin/api/{_SHOPIFY_API_VERSION}/graphql.json"
-        headers = {
-            "X-Shopify-Access-Token": token,
-            "Content-Type": "application/json",
-        }
-
-        all_rows: list[dict] = []
+        rows: list[dict] = []
         cursor = None
-        page_size = 50
-
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=_TIMEOUT) as client:
             while True:
-                resp = client.post(
-                    url,
-                    headers=headers,
-                    json={
-                        "query": _PRODUCTS_QUERY,
-                        "variables": {"first": page_size, "cursor": cursor},
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-
-                if "errors" in data:
-                    raise RuntimeError(f"Shopify GraphQL error: {data['errors']}")
-
-                products_page = data["data"]["products"]
-
-                for edge in products_page["edges"]:
-                    product = edge["node"]
-                    rows = _flatten_product_with_variants(product)
-                    all_rows.extend(rows)
-
-                page_info = products_page["pageInfo"]
-                if not page_info["hasNextPage"]:
+                data = _graphql(store_id, client, _PRODUCTS_QUERY, {"first": 50, "cursor": cursor})
+                page = data["products"]
+                for edge in page["edges"]:
+                    if _is_active(edge["node"]):
+                        rows.extend(_flatten_product_with_variants(edge["node"]))
+                if not page["pageInfo"]["hasNextPage"]:
                     break
-                cursor = page_info["endCursor"]
+                cursor = page["pageInfo"]["endCursor"]
+        return rows
 
-        return all_rows
+    def fetch_product_rows(self, store_id: str, product_gid: str, client: httpx.Client | None = None) -> list[dict] | None:
+        """Rows for one product, or None if it no longer exists or isn't active."""
+        http = client or httpx.Client(timeout=_TIMEOUT)
+        try:
+            node = _graphql(store_id, http, _PRODUCT_QUERY, {"id": product_gid}).get("product")
+        finally:
+            if client is None:
+                http.close()
+        if not node or not _is_active(node):
+            return None
+        return _flatten_product_with_variants(node)
+
+    def product_id_for_inventory_item(self, store_id: str, inventory_item_gid: str,
+                                      client: httpx.Client | None = None) -> str | None:
+        http = client or httpx.Client(timeout=_TIMEOUT)
+        try:
+            item = _graphql(store_id, http, _INVENTORY_ITEM_QUERY, {"id": inventory_item_gid}).get("inventoryItem")
+        finally:
+            if client is None:
+                http.close()
+        return (((item or {}).get("variant") or {}).get("product") or {}).get("id")
+
+
+def _graphql(store_id: str, client: httpx.Client, query: str, variables: dict) -> dict:
+    creds = get_credentials(store_id, "shopify")
+    if creds is None:
+        raise RuntimeError(f"No Shopify credentials for store '{store_id}'. Run OAuth flow first.")
+    resp = client.post(
+        f"https://{creds['shop']}/admin/api/{_SHOPIFY_API_VERSION}/graphql.json",
+        headers={"X-Shopify-Access-Token": creds["access_token"], "Content-Type": "application/json"},
+        json={"query": query, "variables": variables},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "errors" in data:
+        raise RuntimeError(f"Shopify GraphQL error: {data['errors']}")
+    return data.get("data") or {}
+
+
+def _is_active(product: dict) -> bool:
+    return (product.get("status") or "ACTIVE") == "ACTIVE"
+
+
+def _shopify_stock(variant: dict):
+    """Tracked -> real quantity. Not tracked / 'continue selling' -> in stock. No data -> None."""
+    if variant.get("inventoryPolicy") == "CONTINUE":
+        return "in stock"
+    tracked = (variant.get("inventoryItem") or {}).get("tracked")
+    if tracked is False:
+        return "in stock"
+    qty = variant.get("inventoryQuantity")
+    return None if qty is None else max(int(qty), 0)
 
 
 def _flatten_product_with_variants(product: dict) -> list[dict]:
-    """
-    Emit one row per variant, sharing parent's handle as product_id.
-    Each variant carries its own price, sku, stock, and selectedOptions
-    (Size, Color, etc.) flattened as top-level keys.
-    """
+    """One row per variant sharing the product's handle as product_id."""
     handle = product.get("handle") or product.get("id", "").split("/")[-1]
     parent_image = None
-    if product.get("images", {}).get("edges"):
+    if (product.get("images") or {}).get("edges"):
         parent_image = product["images"]["edges"][0]["node"]["url"]
 
     rows = []
-    variant_edges = product.get("variants", {}).get("edges", [])
-
-    for v_edge in variant_edges:
+    for v_edge in (product.get("variants") or {}).get("edges", []):
         v = v_edge["node"]
         row = {
             "product_id": handle,
@@ -180,34 +159,10 @@ def _flatten_product_with_variants(product: dict) -> list[dict]:
             "external_id": v.get("id"),
             "external_parent_id": product.get("id"),
         }
-
-        # Variant image OR parent image fallback
-        v_image = v.get("image") or {}
-        row["image_url"] = v_image.get("url") or parent_image
-
-        # Flatten selectedOptions (Size, Color, etc.) as top-level keys
-        # Skip Shopify's default "Title=Default Title" for simple products.
+        row["image_url"] = (v.get("image") or {}).get("url") or parent_image
         for opt in v.get("selectedOptions", []):
-            name = opt.get("name")
-            value = opt.get("value")
-            if name and value and name != "Title":
+            name, value = opt.get("name"), opt.get("value")
+            if name and value and name != "Title":  # skip Shopify's "Default Title"
                 row[name] = value
-
         rows.append(row)
-
     return rows
-  
-  
-
-def _shopify_stock(variant: dict):
-    """
-    Tracked -> real quantity. Not tracked, or 'continue selling when out
-    of stock' -> in stock. No data -> None (unknown).
-    """
-    if variant.get("inventoryPolicy") == "CONTINUE":
-        return "in stock"
-    tracked = (variant.get("inventoryItem") or {}).get("tracked")
-    if tracked is False:
-        return "in stock"
-    qty = variant.get("inventoryQuantity")
-    return None if qty is None else max(int(qty), 0)
