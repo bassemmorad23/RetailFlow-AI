@@ -16,7 +16,6 @@ from typing import Any
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
-from app.commerce.policies import StorePolicies
 from app.config import settings
 
 
@@ -118,12 +117,3 @@ def find_store_by_fb_page(page_id: str) -> str | None:
 
 
 
-
-
-def get_policies(store_id: str) -> StorePolicies:
-    return StorePolicies(**(get_settings(store_id).policies or {}))
-
-
-def set_policies(store_id: str, policies: StorePolicies) -> None:
-    get_settings(store_id)
-    _get_collection().update_one({"store_id": store_id}, {"$set": {"policies": policies.model_dump()}})

@@ -80,6 +80,7 @@ from app.security.production import docs_kwargs, is_production, require_metrics_
 from app.commerce.routes import router as orders_router
 from app.commerce.routes import cases_router, router as orders_router
 from app.products.routes import router as products_router
+from app.channels.routes import router as channels_router
 
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -111,6 +112,7 @@ app.include_router(widget_router)
 app.include_router(orders_router)
 app.include_router(cases_router)
 app.include_router(products_router)
+app.include_router(channels_router)
 
 app.add_middleware(CorsCsrfMiddleware)
 
